@@ -1,0 +1,34 @@
+# Brain location config (personal, machine-specific)
+brain.path
+
+# Fallback: if brain.path is missing, these land in repo — still ignore them
+daily/
+knowledge/
+reports/
+state.json
+last-flush.json
+flush.log
+compile.log
+session-flush-*.md
+flush-context-*.md
+
+# Claude Code internal files
+.claude/
+memory/
+MEMORY.md
+wiki_*.md
+*.claude.json
+
+# Editor folders
+.vscode/
+.idea/
+
+# Windows
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Temp and logs (catch-all)
+*.tmp
+*.temp
+*.log
