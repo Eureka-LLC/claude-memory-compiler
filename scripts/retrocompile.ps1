@@ -24,6 +24,13 @@
     Максимальное число сессий за один запуск (защита от долгого выполнения).
     0 = без ограничений. По умолчанию: 0.
 
+.PARAMETER BatchSize
+    Размер батча: после каждых N сессий выводится краткий отчёт о прогрессе.
+    По умолчанию: 5. Игнорируется при -NoBatch.
+
+.PARAMETER NoBatch
+    Отключить батч-режим: обработать все сессии без промежуточных отчётов.
+
 .PARAMETER DryRun
     Показать что будет обработано — без записи файлов и API-вызовов.
 
@@ -37,8 +44,14 @@
     # Пробный запуск — посмотреть что будет
     pwsh -File scripts\retrocompile.ps1 -DryRun
 
-    # Быстрый режим, все проекты
+    # Быстрый режим, все проекты (батч по 5)
     pwsh -File scripts\retrocompile.ps1
+
+    # Батч по 10 сессий
+    pwsh -File scripts\retrocompile.ps1 -BatchSize 10
+
+    # Без батч-режима (обработать всё без промежуточных отчётов)
+    pwsh -File scripts\retrocompile.ps1 -NoBatch
 
     # Качественный режим, ограничен 20 сессиями за раз
     pwsh -File scripts\retrocompile.ps1 -Mode Quality -Limit 20
@@ -61,6 +74,10 @@ param(
     [string]$Since = "",
 
     [int]$Limit = 0,
+
+    [int]$BatchSize = 5,
+
+    [switch]$NoBatch,
 
     [switch]$DryRun,
 
@@ -240,6 +257,7 @@ Write-Host "  Проекты:   $(if ($Projects) { $Projects -join ', ' } else {
 Write-Host "  MinTurns:  $MinTurns"
 Write-Host "  Since:     $(if ($Since) { $Since } else { 'всё время' })"
 Write-Host "  Limit:     $(if ($Limit -gt 0) { $Limit } else { 'без ограничений' })"
+Write-Host "  Батч:      $(if ($NoBatch) { 'отключён (-NoBatch)' } else { "$BatchSize сессий" })"
 if ($DryRun)    { Write-Host "  *** ПРОБНЫЙ ЗАПУСК — ничего не записывается ***" -ForegroundColor Yellow }
 if ($NoCompile) { Write-Host "  Финальная компиляция: отключена" -ForegroundColor Yellow }
 Write-Host ""
@@ -282,6 +300,12 @@ $errors        = 0
 $flushedOk     = 0
 $limitReached  = $false
 
+$batchNum       = 0
+$batchCount     = 0   # сессии в текущем батче (не считая dedup-пропуски)
+$batchProcessed = 0
+$batchSkipped   = 0
+$batchErrors    = 0
+
 $modifiedDates = [System.Collections.Generic.HashSet[string]]::new()
 
 # Restore dates pending compilation from a previous interrupted run
@@ -305,11 +329,14 @@ foreach ($file in $allFiles) {
     $timeStr      = $file.LastWriteTime.ToString("HH:mm")
     $projectLabel = Get-ProjectLabel $file.Directory.Name
 
-    # Dedup
+    # Dedup — не считается в батч
     if (-not $Force -and $retroState['processed'].ContainsKey($sessionId)) {
         $skippedDedup++
         continue
     }
+
+    # Эта сессия входит в текущий батч
+    $batchCount++
 
     # Extract turns
     $turns = Extract-Turns -FilePath $file.FullName
@@ -317,6 +344,7 @@ foreach ($file in $allFiles) {
     if ($turns.Count -lt $MinTurns) {
         Write-Host "  SKIP  [$date $timeStr] $projectLabel — $($turns.Count) реплик" -ForegroundColor DarkGray
         $skippedShort++
+        $batchSkipped++
         if (-not $DryRun) {
             $retroState['processed'][$sessionId] = @{
                 date    = $date
@@ -325,59 +353,77 @@ foreach ($file in $allFiles) {
             }
             Save-RetroState $retroState
         }
-        continue
     }
+    else {
+        Write-Host "  OK    [$date $timeStr] $projectLabel — $($turns.Count) реплик" -ForegroundColor Cyan
 
-    Write-Host "  OK    [$date $timeStr] $projectLabel — $($turns.Count) реплик" -ForegroundColor Cyan
-
-    if ($DryRun) { $processed++; continue }
-
-    # Build context (last 30 turns, max 15000 chars)
-    $recent  = if ($turns.Count -gt 30) { $turns | Select-Object -Last 30 } else { $turns }
-    $context = $recent -join "`n`n"
-    if ($context.Length -gt 15000) {
-        $context  = $context.Substring($context.Length - 15000)
-        $boundary = $context.IndexOf("`n`n**")
-        if ($boundary -gt 0) { $context = $context.Substring($boundary + 2) }
-    }
-
-    $logPath = Ensure-DailyLog -Date $date
-
-    try {
-        if ($Mode -eq "Quality") {
-            $summary = Get-QualitySummary -Context $context
-            if ($summary -match "^\s*FLUSH_OK\s*$") {
-                Write-Host "         → ничего ценного (FLUSH_OK)" -ForegroundColor DarkGray
-                $flushedOk++
-            }
-            else {
-                Append-RetroEntry -LogPath $logPath -Content $summary -TimeStr $timeStr -Label $projectLabel
-                Write-Host "         → суммаризовано и записано" -ForegroundColor Green
-            }
+        if ($DryRun) {
+            $processed++
+            $batchProcessed++
         }
         else {
-            # Fast mode: write raw formatted transcript
-            $rawContent = "**Проект:** ``$projectLabel```n`n$context"
-            Append-RetroEntry -LogPath $logPath -Content $rawContent -TimeStr $timeStr -Label $projectLabel
-            Write-Host "         → записано как есть" -ForegroundColor Green
-        }
+            # Build context (last 30 turns, max 15000 chars)
+            $recent  = if ($turns.Count -gt 30) { $turns | Select-Object -Last 30 } else { $turns }
+            $context = $recent -join "`n`n"
+            if ($context.Length -gt 15000) {
+                $context  = $context.Substring($context.Length - 15000)
+                $boundary = $context.IndexOf("`n`n**")
+                if ($boundary -gt 0) { $context = $context.Substring($boundary + 2) }
+            }
 
-        $modifiedDates.Add($date) | Out-Null
-        $retroState['processed'][$sessionId] = @{
-            date         = $date
-            turns        = $turns.Count
-            mode         = $Mode
-            project      = $projectLabel
-            processed_at = (Get-NowIso)
+            $logPath = Ensure-DailyLog -Date $date
+
+            try {
+                if ($Mode -eq "Quality") {
+                    $summary = Get-QualitySummary -Context $context
+                    if ($summary -match "^\s*FLUSH_OK\s*$") {
+                        Write-Host "         → ничего ценного (FLUSH_OK)" -ForegroundColor DarkGray
+                        $flushedOk++
+                    }
+                    else {
+                        Append-RetroEntry -LogPath $logPath -Content $summary -TimeStr $timeStr -Label $projectLabel
+                        Write-Host "         → суммаризовано и записано" -ForegroundColor Green
+                    }
+                }
+                else {
+                    # Fast mode: write raw formatted transcript
+                    $rawContent = "**Проект:** ``$projectLabel```n`n$context"
+                    Append-RetroEntry -LogPath $logPath -Content $rawContent -TimeStr $timeStr -Label $projectLabel
+                    Write-Host "         → записано как есть" -ForegroundColor Green
+                }
+
+                $modifiedDates.Add($date) | Out-Null
+                $retroState['processed'][$sessionId] = @{
+                    date         = $date
+                    turns        = $turns.Count
+                    mode         = $Mode
+                    project      = $projectLabel
+                    processed_at = (Get-NowIso)
+                }
+                $retroState['pending_compile'] = @($modifiedDates)   # persist so resume knows what to compile
+                Save-RetroState $retroState
+                $processed++
+                $batchProcessed++
+            }
+            catch {
+                Write-Host "         ERROR: $_" -ForegroundColor Red
+                Write-RetroLog "ERROR" "session=$sessionId project=$projectLabel error=$_"
+                $errors++
+                $batchErrors++
+            }
         }
-        $retroState['pending_compile'] = @($modifiedDates)   # persist so resume knows what to compile
-        Save-RetroState $retroState
-        $processed++
     }
-    catch {
-        Write-Host "         ERROR: $_" -ForegroundColor Red
-        Write-RetroLog "ERROR" "session=$sessionId project=$projectLabel error=$_"
-        $errors++
+
+    # Батч-отчёт после каждых $BatchSize сессий
+    if (-not $NoBatch -and $batchCount -ge $BatchSize) {
+        $batchNum++
+        $totalSoFar = $processed + $skippedShort + $errors
+        Write-Host ""
+        Write-Host ("  " + ("-" * 46)) -ForegroundColor DarkYellow
+        Write-Host ("  Батч $batchNum завершён  |  обработано: $batchProcessed  пропущено: $batchSkipped  ошибок: $batchErrors  |  итого: $totalSoFar") -ForegroundColor Yellow
+        Write-Host ("  " + ("-" * 46)) -ForegroundColor DarkYellow
+        Write-Host ""
+        $batchCount = 0; $batchProcessed = 0; $batchSkipped = 0; $batchErrors = 0
     }
 }
 

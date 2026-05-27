@@ -136,7 +136,14 @@ pwsh -File scripts\lint.ps1 -StructuralOnly
 pwsh -File scripts\retrocompile.ps1 -DryRun
 
 # Быстрый режим: скрипт сам пишет реплики в daily-логи → compile делает 1 вызов на день
+# По умолчанию работает в батч-режиме: отчёт после каждых 5 сессий
 pwsh -File scripts\retrocompile.ps1
+
+# Батч по 10 сессий
+pwsh -File scripts\retrocompile.ps1 -BatchSize 10
+
+# Без батч-режима — обработать всё без промежуточных отчётов
+pwsh -File scripts\retrocompile.ps1 -NoBatch
 
 # Качественный режим: Claude суммаризирует каждую сессию → лучшие статьи
 pwsh -File scripts\retrocompile.ps1 -Mode Quality
@@ -163,6 +170,8 @@ pwsh -File scripts\retrocompile.ps1 -Force
 | `-MinTurns` | Минимум реплик в сессии | `3` |
 | `-Since` | Только с даты `YYYY-MM-DD` | всё время |
 | `-Limit` | Макс. сессий за запуск | без ограничений |
+| `-BatchSize` | Отчёт после каждых N сессий | `5` |
+| `-NoBatch` | Отключить батч-режим | — |
 | `-DryRun` | Показать план без изменений | — |
 | `-Force` | Повторно обработать сессии | — |
 | `-NoCompile` | Только daily-логи, без compile | — |

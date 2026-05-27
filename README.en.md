@@ -132,7 +132,14 @@ Already using Claude Code before installing this tool? No problem — `retrocomp
 pwsh -File scripts\retrocompile.ps1 -DryRun
 
 # Fast mode: script writes turns directly to daily logs → compile does 1 API call per day
+# Runs in batch mode by default: progress report after every 5 sessions
 pwsh -File scripts\retrocompile.ps1
+
+# Batch of 10 sessions
+pwsh -File scripts\retrocompile.ps1 -BatchSize 10
+
+# No batching — process everything without intermediate reports
+pwsh -File scripts\retrocompile.ps1 -NoBatch
 
 # Quality mode: Claude summarizes each session individually → richer articles
 pwsh -File scripts\retrocompile.ps1 -Mode Quality
@@ -159,6 +166,8 @@ pwsh -File scripts\retrocompile.ps1 -Force
 | `-MinTurns` | Minimum turns per session | `3` |
 | `-Since` | Only sessions from `YYYY-MM-DD` | all time |
 | `-Limit` | Max sessions per run | unlimited |
+| `-BatchSize` | Progress report after every N sessions | `5` |
+| `-NoBatch` | Disable batch mode | — |
 | `-DryRun` | Show plan without changes | — |
 | `-Force` | Reprocess tracked sessions | — |
 | `-NoCompile` | Fill daily logs only, skip compile | — |
