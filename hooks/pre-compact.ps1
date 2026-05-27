@@ -10,7 +10,8 @@ if ($env:CLAUDE_INVOKED_BY) { exit 0 }
 $REPO_DIR  = Split-Path $PSScriptRoot -Parent
 $brainFile = Join-Path $REPO_DIR "brain.path"
 $BRAIN_DIR = if (Test-Path $brainFile) { (Get-Content $brainFile -Raw -Encoding UTF8).Trim() } else { $REPO_DIR }
-$FLUSH_LOG = Join-Path $BRAIN_DIR "flush.log"
+$CLAUDE_DIR = Join-Path $BRAIN_DIR ".claude"
+$FLUSH_LOG  = Join-Path $CLAUDE_DIR "flush.log"
 $FLUSH_PS1 = Join-Path $REPO_DIR "scripts\flush.ps1"
 
 $MAX_TURNS         = 30
