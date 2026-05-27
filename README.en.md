@@ -165,12 +165,16 @@ pwsh -File scripts\retrocompile.ps1 -Force
 | `-Projects` | Filter by project name (substring) | all |
 | `-MinTurns` | Minimum turns per session | `3` |
 | `-Since` | Only sessions from `YYYY-MM-DD` | all time |
-| `-Limit` | Max sessions per run | unlimited |
+| `-Limit` | Max **processed** sessions per run | unlimited |
 | `-BatchSize` | Progress report after every N sessions | `5` |
 | `-NoBatch` | Disable batch mode | — |
 | `-DryRun` | Show plan without changes | — |
 | `-Force` | Reprocess tracked sessions | — |
 | `-NoCompile` | Fill daily logs only, skip compile | — |
+
+> **How `-Limit` is counted:** the limit applies only to sessions that are actually processed — i.e. those that pass the `-MinTurns` threshold and get summarized or written. Already-processed sessions and sessions that are too short don't count toward the limit, but the script still has to scan past them.
+>
+> Example: your archive has 200 short test sessions (1–2 turns) and 10 meaningful ones. `-Limit 5` will make the script scroll through all 200 short sessions to find 5 good ones — and only then stop. This is expected behaviour: short sessions are marked as skipped in `retro-processed.json` along the way, so on the next run they are skipped instantly.
 
 **Two modes explained:**
 
