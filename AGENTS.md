@@ -1,28 +1,29 @@
-# AGENTS.md — Knowledge Base Schema
+# AGENTS.md — Схема базы знаний
 
-> Adapted from [Andrej Karpathy's LLM Knowledge Base](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) architecture.
-> Original Python implementation: [coleam00/claude-memory-compiler](https://github.com/coleam00/claude-memory-compiler).
-> Instead of ingesting external articles, this system compiles knowledge from your own AI conversations.
+> Адаптировано из архитектуры [LLM Knowledge Base Андрея Карпатого](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
+> Оригинальная реализация на Python: [coleam00/claude-memory-compiler](https://github.com/coleam00/claude-memory-compiler).
+> Английский оригинал этой схемы — [AGENTS.en.md](AGENTS.en.md).
+> Вместо внешних статей система компилирует знания из собственных AI-диалогов.
 
-## The Compiler Analogy
+## Аналогия с компилятором
 
 ```
-daily/          = source code    (your conversations — the raw material)
-LLM             = compiler       (extracts and organizes knowledge)
-knowledge/      = executable     (structured, queryable knowledge base)
-lint            = test suite     (health checks for consistency)
-queries         = runtime        (using the knowledge)
+daily/          = исходный код   (твои разговоры — сырьё)
+LLM             = компилятор      (извлекает и структурирует знания)
+knowledge/      = исполняемое      (структурированная база знаний)
+lint            = тесты            (проверки целостности)
+queries         = выполнение       (использование знаний)
 ```
 
 ---
 
-## Architecture
+## Архитектура
 
-### Layer 1: `daily/` — Conversation Logs (Immutable Source)
+### Слой 1: `daily/` — логи разговоров (неизменяемый источник)
 
-Daily logs capture what happened in your AI coding sessions. Append-only, never edited after the fact.
+Дневные логи фиксируют, что происходило в AI-сессиях. Только дозапись, после факта не редактируются.
 
-Each file follows this format:
+Каждый файл следует формату:
 
 ```markdown
 # Daily Log: YYYY-MM-DD
@@ -31,78 +32,121 @@ Each file follows this format:
 
 ### Session (HH:MM)
 
-**Context:** What the user was working on.
+_Проект: имя-папки — E:\Leskei\полный\путь_
 
-**Key Exchanges:**
-- User asked about X, assistant explained Y
-- Decided to use Z approach because...
+**Контекст:** Чем занимался пользователь.
 
-**Decisions Made:**
-- Chose library X over Y because...
+**Ключевые обмены:**
+- Пользователь спросил про X, ассистент объяснил Y
+- Решили использовать подход Z, потому что…
 
-**Lessons Learned:**
-- Always do X before Y to avoid...
+**Принятые решения:**
+- Выбрали библиотеку X вместо Y, потому что…
 
-**Action Items:**
-- [ ] Follow up on X
+**Выводы:**
+- Всегда делать X перед Y, чтобы избежать…
+
+**Задачи:**
+- [ ] Вернуться к X
 ```
 
-### Layer 2: `knowledge/` — Compiled Knowledge (LLM-Owned)
+> **Строка провенанса `_Проект:_`** обязательна под заголовком каждой сессии. Это **происхождение**
+> урока — из какого проекта он пришёл (имя папки корня git-репозитория + полный путь). В одном
+> дневном логе сессии разных проектов помечены посессионно — компилятор по этой строке разносит
+> уроки по проектам. Если проект не определён — `unknown`.
+
+### Слой 2: `knowledge/` — скомпилированные знания (принадлежат LLM)
 
 ```
 knowledge/
-├── index.md              # Master catalog — every article with one-line summary
-├── log.md                # Append-only chronological build log
-├── concepts/             # Atomic knowledge articles
-├── connections/          # Cross-cutting insights linking 2+ concepts
-└── qa/                   # Filed query answers
+├── index.md              # Главный каталог — каждая статья с однострочным описанием
+├── log.md                # Хронологический лог сборок (только дозапись)
+├── concepts/             # Атомарные статьи знаний
+├── connections/          # Кросс-связи между 2+ концептами
+└── qa/                   # Сохранённые ответы на запросы
 ```
 
 ---
 
-## Article Formats
+## Форматы статей
 
-### Concept Articles (`knowledge/concepts/`)
+### Статьи-концепты (`knowledge/concepts/`)
 
 ```markdown
 ---
-title: "Concept Name"
-aliases: [alternate-name]
-tags: [domain, topic]
+title: "Имя концепта"
+aliases: [альт-имя]
+tags: [домен, тема]
+type: concept
+scope: project
+source_project: имя-папки
+domains: [домен1, домен2]
+summary: "Однострочное описание для индекса"
 sources:
   - "daily/2026-05-26.md"
 created: 2026-05-26
 updated: 2026-05-26
 ---
 
-# Concept Name
+# Имя концепта
 
-[2-4 sentence core explanation]
+[Объяснение сути в 2-4 предложения]
 
-## Key Points
+## Ключевые моменты
 
-- [Self-contained bullet points]
+- [Самодостаточные пункты]
 
-## Details
+## Детали
 
-[Deeper explanation, encyclopedia-style]
+[Более глубокое объяснение, в энциклопедическом стиле]
 
-## Related Concepts
+## Связанные концепты
 
-- [[concepts/related-concept]] — How it connects
+- [[concepts/related-concept]] — Как связано
 
-## Sources
+## Источники
 
-- [[daily/2026-05-26.md]] — Initial discovery
+- [[daily/2026-05-26.md]] — Первое обнаружение
 ```
 
-### Connection Articles (`knowledge/connections/`)
+#### Новые поля frontmatter (маршрутизация по проектам)
 
-Created when a conversation reveals a non-obvious relationship between 2+ concepts.
+| Поле | Значения | Назначение |
+|------|----------|-----------|
+| `type` | `concept` \| `rule` | `rule` — императивный урок «делай / не-делай / подвох» (грабли, анти-паттерн). `concept` — энциклопедическая статья. Правила — самые ценные переиспользуемые уроки, подмешиваются в первую очередь. |
+| `scope` | `global` \| `project` | `global` — урок полезен в **любом** проекте. `project` — факт только этого проекта. Управляет фильтром подмешивания. |
+| `source_project` | имя-папки \| `unknown` | Происхождение: имя папки корня git-репо, откуда пришёл урок (из строки `_Проект:_`). При нескольких источниках — перечислить через запятую. |
+| `summary` | строка | Однострочное описание для индекса. Индекс — чистая проекция frontmatter, поэтому `summary` обязателен. |
+| `domains` | список | Области применимости из словаря `domains.md` (напр. `[wordpress, css-frontend]`). Ось релевантности для фильтра по доменам. **Проставляется автоматически** после компиляции (`tag-domains.ps1`, выбор строго из словаря) — LLM-компилятору это поле заполнять не нужно. |
+
+#### Эвристика scope: где проходит граница
+
+Ось разделения — **переносимый механизм vs локальный факт**, а НЕ технология.
+
+| Знание | scope | Почему |
+|--------|-------|--------|
+| Поведение SQLite, PowerShell, OS, инструмента | `global` | работает в любом проекте |
+| Схема конкретной БД, имена/типы полей | `project` | факт про конкретную систему |
+| Баг/особенность языка или CLI | `global` | переносимо |
+| Бизнес-логика, ключи API конкретной системы | `project` | домен одного проекта |
+
+**Контрольный вопрос:** «пригодится ли этот урок в ДРУГОМ проекте?» Да → `global`. Только внутри этого
+кода/домена → `project`.
+
+**Смещение в сторону global.** Несимметрия ошибок: ложно-`project` хуже ложно-`global` — глобальный
+урок (тот же PowerShell), ошибочно помеченный проектным, утонет в одном проекте и не подстрахует в
+других. Поэтому инструментальные / языковые / OS-уроки по умолчанию → `global`; в `project` отправлять
+только явные локальные факты (схемы, поля, ключи, бизнес-логику).
+
+### Статьи-связи (`knowledge/connections/`)
+
+Создаются, когда разговор вскрывает неочевидную связь между 2+ концептами.
 
 ```markdown
 ---
-title: "Connection: X and Y"
+title: "Связь: X и Y"
+type: concept
+scope: global
 connects:
   - "concepts/concept-x"
   - "concepts/concept-y"
@@ -112,61 +156,71 @@ created: 2026-05-26
 updated: 2026-05-26
 ---
 
-# Connection: X and Y
+# Связь: X и Y
 
-## The Connection
+## Суть связи
 
-[What links these concepts]
+[Что связывает эти концепты]
 
-## Key Insight
+## Ключевой инсайт
 
-[The non-obvious relationship]
+[Неочевидная взаимосвязь]
 
-## Evidence
+## Свидетельства
 
-[Specific examples from conversations]
+[Конкретные примеры из разговоров]
 
-## Related Concepts
+## Связанные концепты
 
 - [[concepts/concept-x]]
 - [[concepts/concept-y]]
 ```
 
-### Q&A Articles (`knowledge/qa/`)
+> Связи по умолчанию `scope: global` (кросс-проектный инсайт). Если связь объединяет только концепты
+> одного проекта — допустимо `scope: project` + `source_project`.
+
+### Статьи Q&A (`knowledge/qa/`)
 
 ```markdown
 ---
-title: "Q: Original Question"
-question: "The exact question asked"
+title: "Q: Исходный вопрос"
+question: "Точная формулировка вопроса"
 consulted:
   - "concepts/article-1"
 filed: 2026-05-26
 ---
 
-# Q: Original Question
+# Q: Исходный вопрос
 
-## Answer
+## Ответ
 
-[Synthesized answer with [[wikilinks]]]
+[Синтезированный ответ с [[wikilinks]]]
 
-## Sources Consulted
+## Источники
 
-- [[concepts/article-1]] — Relevant because...
+- [[concepts/article-1]] — Релевантно, потому что…
 ```
 
 ---
 
-## Structural Files
+## Структурные файлы
 
 ### `knowledge/index.md`
+
+Индекс — **детерминированная проекция** frontmatter всех статей. Его собирает `reindex.ps1`, а **не**
+LLM. Колонки:
 
 ```markdown
 # Knowledge Base Index
 
-| Article | Summary | Compiled From | Updated |
-|---------|---------|---------------|---------|
-| [[concepts/example]] | One-line description | daily/2026-05-26.md | 2026-05-26 |
+| Article | Type | Scope | Project | Domains | Summary | Compiled From | Updated |
+|---------|------|-------|---------|---------|---------|---------------|---------|
+| [[concepts/example]] | rule | global | claude-memory-compiler | powershell | Однострочное описание | daily/2026-05-26.md | 2026-05-26 |
 ```
+
+Хук `session-start` парсит эту таблицу и подмешивает только строки, где `Scope == global` ИЛИ
+`Project == <текущий проект>`. Поэтому колонки `Scope`/`Project` обязаны быть корректны — отсюда
+детерминированная сборка.
 
 ### `knowledge/log.md`
 
@@ -180,31 +234,37 @@ filed: 2026-05-26
 
 ---
 
-## Compile Rules
+## Правила компиляции
 
-When processing a daily log:
+При обработке дневного лога:
 
-1. Read the daily log and current knowledge state.
-2. For each piece of knowledge:
-   - If an existing concept article covers it: **UPDATE** it, add the daily log as a source.
-   - If it's a new topic: **CREATE** a new `concepts/` article.
-3. If the log reveals a non-obvious connection: **CREATE** a `connections/` article.
-4. **UPDATE** `knowledge/index.md` with new/modified entries.
-5. **APPEND** to `knowledge/log.md`.
+1. Прочитай дневной лог и текущее состояние базы. У каждой сессии есть строка `_Проект:_` — это
+   **происхождение** уроков этой сессии.
+2. Для каждого знания:
+   - Если существующий концепт его покрывает: **ОБНОВИ** его, добавь дневной лог в `sources`.
+   - Если тема новая: **СОЗДАЙ** новую статью в `concepts/`.
+3. Если лог вскрыл неочевидную связь: **СОЗДАЙ** статью в `connections/`.
+4. **НЕ трогай** `index.md` — его детерминированно пересоберёт `reindex.ps1`.
+5. **ДОПИШИ** запись в `knowledge/log.md`.
 
-**Quality standards:**
-- Complete YAML frontmatter on every article.
-- Every article links to at least 2 others via `[[wikilinks]]`.
-- Key Points: 3–5 self-contained bullet points.
-- Details: 2+ paragraphs.
-- Sources section cites the daily log.
-- File names: lowercase, hyphens (e.g., `supabase-row-level-security.md`).
+**Обязательно у каждого концепта:** `type`, `scope`, `source_project`, `summary` (см. эвристику выше,
+смещение в global), плюс `title`, `sources`, `created`, `updated`.
+
+**Стандарты качества:**
+- Полный YAML frontmatter на каждой статье.
+- Каждая статья ссылается минимум на 2 другие через `[[wikilinks]]`.
+- Ключевые моменты: 3–5 самодостаточных пунктов.
+- Детали: 2+ абзаца.
+- Раздел «Источники» цитирует дневной лог.
+- Имена файлов: строчные, через дефис (например, `supabase-row-level-security.md`).
 
 ---
 
-## Conventions
+## Соглашения
 
-- **Wikilinks:** Obsidian-style `[[path/to/article]]` without `.md` extension.
-- **Writing style:** Encyclopedia-style, factual, concise.
-- **Dates:** ISO 8601 (YYYY-MM-DD).
-- **Frontmatter:** Every article must have `title`, `sources`, `created`, `updated`.
+- **Wikilinks:** в стиле Obsidian `[[path/to/article]]` без расширения `.md`.
+- **Стиль письма:** энциклопедический, фактологичный, сжатый. Содержание — на русском, имена файлов —
+  на английском.
+- **Даты:** ISO 8601 (YYYY-MM-DD).
+- **Frontmatter:** у каждой статьи обязательны `title`, `sources`, `created`, `updated`; у концептов
+  дополнительно `type`, `scope`, `source_project`, `summary`.

@@ -23,10 +23,13 @@ E:\my-brain\                        ← база знаний (данные) —
     .claude\                        ← все данные memory compiler (как .git/)
         daily\                      ← сюда автоматически падают все разговоры
         knowledge\
+        │   index.md                ← каталог (Type/Scope/Project/Domains/Summary)
         │   concepts\
         │   connections\
         └── qa\
         reports\
+        domains.md                  ← словарь доменов (контролируемый список)
+        projects.json               ← реестр: проект → путь репо + домены проекта
 ```
 
 `setup.ps1` спрашивает, где хочешь хранить данные, сохраняет путь в `brain.path` и прописывает **глобальные** хуки Claude Code. После этого **все сессии из любых проектов** автоматически попадают в одну базу знаний.
@@ -120,11 +123,29 @@ pwsh -File scripts\query.ps1 "Как я обычно обрабатываю ош
 # Задать вопрос и сохранить ответ обратно в базу
 pwsh -File scripts\query.ps1 "Какие паттерны я использую для аутентификации?" -FileBack
 
-# Проверка здоровья базы знаний (7 проверок)
+# Проверка здоровья базы знаний (8 проверок)
 pwsh -File scripts\lint.ps1
 
 # Только структурные проверки (без API, бесплатно)
 pwsh -File scripts\lint.ps1 -StructuralOnly
+
+# Пересобрать индекс из frontmatter (детерминированно, без API)
+pwsh -File scripts\reindex.ps1
+
+# Разовая реклассификация легаси: проставить scope/type/source_project
+pwsh -File scripts\reclassify.ps1 -DryRun   # сначала посмотреть план
+pwsh -File scripts\reclassify.ps1            # затем выполнить
+
+# Домены текущего проекта (или slash-команда /domains)
+pwsh -File scripts\project-domains.ps1                       # показать домены + словарь
+pwsh -File scripts\project-domains.ps1 "wordpress, php-web"  # добавить
+pwsh -File scripts\project-domains.ps1 "-css-frontend"       # убрать
+
+# «Налог второго мозга»: размер контекста, подмешиваемого в проект (или /brain)
+pwsh -File scripts\brain-stats.ps1
+
+# Статьи без проставленных доменов
+pwsh -File scripts\list-no-domains.ps1
 ```
 
 ### ⭐ Ретроспективная компиляция
@@ -189,16 +210,59 @@ pwsh -File scripts\retrocompile.ps1 -Force
 
 ---
 
+## Глобальные и проектные знания
+
+База знаний общая для всех проектов, но не всё знание универсально. Каждая статья помечена во frontmatter:
+
+- `scope: global | project` — `global` полезно везде (повадки PowerShell, OS, инструментов), `project` относится только к одному проекту (схема БД, поля, ключи API, бизнес-логика).
+- `source_project` — из какого проекта пришёл урок (имя папки корня git-репозитория). Хуки определяют его по `cwd` сессии и пишут строку `_Проект:_` в дневной лог; компилятор по ней разносит знания.
+- `type: concept | rule` — `rule` это императивный урок «делай / не-делай / подвох» (грабли); такие подаются в контекст первыми.
+
+**Фильтр подмешивания.** `session-start.ps1` берёт текущий проект из `cwd` и инжектит только `scope: global` плюс статьи текущего проекта. В проекте A ты больше не видишь факты проекта B — меньше шума, меньше токенов.
+
+**Где решается scope.** Классификацию делает компилятор (`compile.ps1`) в момент записи, со смещением в сторону `global` (потерять глобальный урок в одном проекте хуже, чем переклассифицировать локальный факт). `lint.ps1` — аудитор: помечает подозрительный scope, но ничего не переносит.
+
+> Индекс `knowledge/index.md` пересобирается детерминированно скриптом `reindex.ps1` из frontmatter — фильтр в `session-start` опирается на колонки `Scope`/`Project`, поэтому индекс строит код, а не LLM.
+
+---
+
+## Домены: второй слой меток
+
+Помимо `scope`/`source_project` у каждой статьи есть поле `domains: [..]` — теги области применимости из **контролируемого словаря** `.claude/domains.md` (по одному домену на строку). Это вторая ось релевантности (`wordpress`, `css-frontend`, `python`, `amocrm`…).
+
+- **Автотегирование.** `tag-domains.ps1` — шаг конвейера: `compile.ps1` вызывает его после записи статей и перед `reindex`. Словарь закрытый: всё, чего нет в `domains.md`, отбрасывается. Хеш-гейт по содержимому: повторно классифицируются только новые или изменённые статьи (`-Force` — переклассифицировать все).
+- **Домены проекта.** `project-domains.ps1` (команда `/domains`) хранит домены проекта в `projects.json`; `brain-stats.ps1` (команда `/brain`) показывает размер подмешиваемого контекста.
+
+> **Статус.** Домены сейчас **собираются и отображаются**, но фильтр `session-start` всё ещё отбирает строки только по `Scope`/`Project`. Маршрутизация по доменам — запланированный потребитель, пока не подключён.
+
+### Массовое ревью легаси (Excel)
+
+Для ручной разметки большой уже накопленной базы есть полуавтоматический проход через Excel:
+
+```powershell
+pwsh -File scripts\suggest-domains.ps1     # 1. LLM-предложения доменов → domain-suggestions.json
+pwsh -File scripts\export-review.ps1       # 2. собрать review.xlsx (чекбокс на каждый домен)
+#                                            3. отредактировать review.xlsx руками
+pwsh -File scripts\apply-review.ps1        # 4. прочитать xlsx обратно → во frontmatter, reindex, lint
+pwsh -File scripts\apply-review.ps1 -DryRun  # предпросмотр без записи
+```
+
+Это **единственная часть проекта на Python**: сборка и чтение `.xlsx` идут через `build-review-xlsx.py` / `read-review-xlsx.py`, которые `export-review`/`apply-review` вызывают сами. Нужны Python 3 и `openpyxl` (`py -m pip install openpyxl`). Путь к мозгу скрипты получают от PowerShell аргументом — хардкода нет.
+
+---
+
 ## Как работает
 
 ```
 Разговор
-  → SessionEnd / PreCompact хуки (только файловый I/O, без API)
-  → scripts\flush.ps1 фоном (Anthropic API: что стоит запомнить?)
-  → daily\YYYY-MM-DD.md (дневной лог)
-  → scripts\compile.ps1 (Anthropic API + tool use: write_file, append_file)
+  → SessionEnd / PreCompact хуки (файловый I/O + определение проекта по cwd)
+  → scripts\flush.ps1 фоном (claude -p: что стоит запомнить?)
+  → daily\YYYY-MM-DD.md (дневной лог со строкой _Проект:_)
+  → scripts\compile.ps1 (claude -p: статьи + scope / source_project / type)
+  → scripts\tag-domains.ps1 (домены из словаря во frontmatter, hash-gated)
+  → scripts\reindex.ps1 (детерминированный index.md из frontmatter)
   → knowledge\concepts\, connections\, qa\ (статьи базы знаний)
-  → SessionStart хук инжектирует index.md в следующую сессию
+  → SessionStart хук инжектирует индекс ТЕКУЩЕГО проекта в следующую сессию
   → цикл повторяется
 ```
 
@@ -208,14 +272,24 @@ pwsh -File scripts\retrocompile.ps1 -Force
 |------|-----------|
 | `hooks\session-end.ps1` | Захватывает транскрипт при завершении сессии |
 | `hooks\pre-compact.ps1` | Страховка: захватывает контекст перед авто-компакцией |
-| `hooks\session-start.ps1` | Инжектирует индекс базы знаний в каждую сессию |
+| `hooks\session-start.ps1` | Инжектирует индекс **текущего проекта** (global + этот проект) |
 | `scripts\flush.ps1` | Фоновый процесс: извлекает важное из разговора |
-| `scripts\compile.ps1` | Компилирует дневные логи в структурированные статьи |
+| `scripts\compile.ps1` | Компилирует дневные логи в статьи + классифицирует scope/type |
+| `scripts\reindex.ps1` | Детерминированно пересобирает `index.md` из frontmatter |
+| `scripts\reclassify.ps1` | Разовая реклассификация легаси (scope/type/source_project) |
 | `scripts\retrocompile.ps1` | **Ретроспективная компиляция** исторических сессий в базу знаний |
+| `scripts\tag-domains.ps1` | Тегирует статьи доменами из словаря (шаг конвейера compile, hash-gated) |
+| `scripts\suggest-domains.ps1` | LLM-предложения доменов в JSON (для Excel-ревью) |
+| `scripts\project-domains.ps1` | Домены проекта в `projects.json` (команда `/domains`) |
+| `scripts\list-no-domains.ps1` | Список статей без доменов |
+| `scripts\brain-stats.ps1` | Размер подмешиваемого контекста проекта (команда `/brain`) |
+| `scripts\export-review.ps1` | Выгрузка статей в `review.xlsx` для ручного ревью доменов/scope |
+| `scripts\apply-review.ps1` | Применить отредактированный `review.xlsx` обратно во frontmatter |
+| `scripts\*-review-xlsx.py` | Python+openpyxl: сборка/чтение `review.xlsx` (вызываются из PS) |
 | `scripts\query.ps1` | Задаёт вопросы базе знаний |
-| `scripts\lint.ps1` | 7 проверок здоровья базы знаний |
-| `scripts\_api.ps1` | Утилиты: вызов Anthropic API + цикл tool use |
-| `scripts\_config.ps1` | Константы путей |
+| `scripts\lint.ps1` | 8 проверок здоровья базы знаний (вкл. аудит scope) |
+| `scripts\_api.ps1` | Утилиты: вызов `claude` CLI + парсинг файловых операций |
+| `scripts\_config.ps1` | Константы путей + хелперы проекта/frontmatter |
 
 ### Почему PowerShell вместо Python?
 
@@ -238,15 +312,27 @@ claude-memory-compiler/
 │   ├── session-start.ps1
 │   └── pre-compact.ps1
 ├── scripts\
-│   ├── _config.ps1          # константы путей (dot-source)
+│   ├── _config.ps1          # пути + хелперы проекта/frontmatter (dot-source)
 │   ├── _api.ps1             # Invoke-ClaudeCLI, Invoke-ParseFileOps
 │   ├── flush.ps1            # фоновый процесс извлечения памяти
-│   ├── compile.ps1          # компилятор дневных логов
+│   ├── compile.ps1          # компилятор дневных логов + классификация scope
+│   ├── tag-domains.ps1      # автотегирование доменами (шаг compile)
+│   ├── reindex.ps1          # детерминированный index.md из frontmatter
+│   ├── reclassify.ps1       # разовая реклассификация легаси
 │   ├── retrocompile.ps1     # ретроспективная компиляция архива
+│   ├── project-domains.ps1  # домены проекта (/domains)
+│   ├── brain-stats.ps1      # размер подмешиваемого контекста (/brain)
+│   ├── list-no-domains.ps1  # статьи без доменов
+│   ├── suggest-domains.ps1  # LLM-предложения доменов (для Excel-ревью)
+│   ├── export-review.ps1    # выгрузка в review.xlsx
+│   ├── apply-review.ps1     # применение review.xlsx обратно
+│   ├── build-review-xlsx.py # сборка xlsx (Python+openpyxl)
+│   ├── read-review-xlsx.py  # чтение xlsx (Python+openpyxl)
 │   ├── query.ps1            # запросы к базе знаний
-│   └── lint.ps1             # проверка здоровья
+│   └── lint.ps1             # проверка здоровья (8 проверок)
 ├── setup.ps1             # скрипт установки
-├── AGENTS.md             # схема базы знаний (читается LLM)
+├── AGENTS.md             # схема базы знаний на русском (читается LLM)
+├── AGENTS.en.md          # английский оригинал схемы
 └── README.md
 ```
 
@@ -258,6 +344,7 @@ claude-memory-compiler/
 |----------|-------------------|
 | Flush одной сессии | ~$0.02–0.05 |
 | Компиляция одного дневного лога | ~$0.45–0.65 |
+| Тегирование доменов (одна статья) | ~$0.02–0.05 |
 | Ретрокомпиляция Fast (весь архив) | ~$0.45–0.65 × кол-во дней |
 | Ретрокомпиляция Quality (одна сессия) | ~$0.02–0.05 |
 | Запрос к базе | ~$0.15–0.25 |
