@@ -28,6 +28,7 @@ E:\my-brain\                        ← knowledge base (data) — configured in 
         reports\
         domains.md                  ← domain vocabulary (controlled list)
         projects.json               ← registry: project → repo path + project domains
+        domain-gaps.log             ← out-of-vocabulary domain candidates (from prompts)
 ```
 
 `setup.ps1` asks where you want to store your data, saves the path to `brain.path`, and registers **global** Claude Code hooks. After that, **all your sessions from any project** feed into this one knowledge base.
@@ -84,6 +85,10 @@ Hooks can be configured **globally** (active across all projects) in `~\.claude\
     "SessionStart": [{
       "matcher": "",
       "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File E:\\claude-memory-compiler\\hooks\\session-start.ps1", "timeout": 15 }]
+    }],
+    "UserPromptSubmit": [{
+      "matcher": "",
+      "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File E:\\claude-memory-compiler\\hooks\\user-prompt-submit.ps1", "timeout": 20 }]
     }],
     "PreCompact": [{
       "matcher": "",
@@ -214,11 +219,11 @@ The knowledge base is shared across all projects, but not every lesson is univer
 - `source_project` — which project the lesson came from (the git repo root's folder name). Hooks derive it from the session's `cwd` and write a `_Проект:_` provenance line into the daily log; the compiler uses it to route knowledge per project.
 - `type: concept | rule` — `rule` is an imperative do/don't/gotcha lesson; rules are surfaced first.
 
-**Injection filter.** `session-start.ps1` reads the current project from `cwd` and injects only `scope: global` plus the current project's articles. In project A you no longer see project B's facts — less noise, fewer tokens.
+**Injection filter.** `session-start.ps1` reads the current project from `cwd` and injects the current project's articles plus `scope: global` articles **filtered by the project's domains** (see the Domains section). In project A you no longer see project B's facts — less noise, fewer tokens.
 
 **Where scope is decided.** The compiler (`compile.ps1`) classifies at write time, biased toward `global` (losing a global lesson inside one project is worse than re-tagging a local fact). `lint.ps1` is an auditor: it flags suspicious scope but never moves anything.
 
-> `knowledge/index.md` is rebuilt deterministically by `reindex.ps1` from frontmatter — the `session-start` filter relies on the `Scope`/`Project` columns, so the index is built by code, not the LLM.
+> `knowledge/index.md` is rebuilt deterministically by `reindex.ps1` from frontmatter — the `session-start` filter relies on the `Scope`/`Project`/`Domains` columns, so the index is built by code, not the LLM.
 
 ---
 
@@ -229,7 +234,20 @@ On top of `scope`/`source_project`, every article carries a `domains: [..]` fiel
 - **Auto-tagging.** `tag-domains.ps1` is a pipeline step: `compile.ps1` calls it after writing articles and before `reindex`. The vocabulary is closed — anything not in `domains.md` is dropped. A content hash gate means only new or changed articles are reclassified (`-Force` re-tags everything).
 - **Project domains.** `project-domains.ps1` (the `/domains` command) stores a project's domains in `projects.json`; `brain-stats.ps1` (the `/brain` command) reports the size of the injected context.
 
-> **Status.** Domains are currently **collected and displayed**, but the `session-start` filter still selects rows by `Scope`/`Project` only. Domain-based routing is a planned consumer, not yet wired in.
+### Domain injection filter
+
+`session-start` injects a `scope: global` article only if its domains **intersect the project's domains**. The rule is **fail-closed**: an article with no domains, or a project with an empty profile → global is not injected. The project's own articles (`scope: project`) are always injected; domains don't gate them. The predicate is `Test-RowInjected` in `scripts/_config.ps1`, shared with `/brain` so the report and the actual injection never drift. Kill switch: `$DOMAIN_FILTER` in `_config.ps1` (`$false` → previous behaviour, all global).
+
+### Auto-populating the profile from prompts
+
+You don't have to maintain the project's domain profile by hand — it accrues on its own. The **`UserPromptSubmit`** hook (`hooks/user-prompt-submit.ps1`) makes one lightweight-model call per prompt and:
+
+1. classifies the prompt against the `domains.md` vocabulary (`$DOMAINIZE_MODEL`, defaults to `claude-haiku-4-5`);
+2. adds any missing domains to the project's profile (`projects.json`) and asks the assistant to mention it in the chat;
+3. **tops up the current session immediately** with the added domain's `global` articles (which weren't in the start-of-session injection);
+4. if the prompt is clearly about an area **outside the vocabulary**, writes a candidate line to `.claude/domain-gaps.log` for manually extending `domains.md`.
+
+> Domains are only ever added (a ratchet); remove a wrong one by hand — `/domains -<domain>`. The stream is self-quenching: the vocabulary is finite, only missing domains get added.
 
 ### Legacy bulk review (Excel)
 
@@ -258,7 +276,8 @@ Conversation
   → scripts\tag-domains.ps1 (domains from the vocabulary into frontmatter, hash-gated)
   → scripts\reindex.ps1 (deterministic index.md from frontmatter)
   → knowledge\concepts\, connections\, qa\ (knowledge base articles)
-  → SessionStart hook injects the CURRENT project's index into the next session
+  → SessionStart hook injects the CURRENT project's index (project articles + global∩domains)
+  → UserPromptSubmit hook: each prompt's domains → project profile + top-up of their global articles
   → cycle repeats
 ```
 
@@ -268,7 +287,8 @@ Conversation
 |------|---------|
 | `hooks\session-end.ps1` | Captures transcript at session end |
 | `hooks\pre-compact.ps1` | Safety net: captures context before auto-compaction |
-| `hooks\session-start.ps1` | Injects the **current project's** index (global + this project) |
+| `hooks\session-start.ps1` | Injects the **current project's** index (project articles + global, filtered by the project's domains) |
+| `hooks\user-prompt-submit.ps1` | Per prompt: prompt's domains → project profile (`projects.json`), top-up of their global articles, log of out-of-vocab candidates (`domain-gaps.log`) |
 | `scripts\flush.ps1` | Background process: extracts knowledge from conversation |
 | `scripts\compile.ps1` | Compiles daily logs into articles + classifies scope/type |
 | `scripts\reindex.ps1` | Rebuilds `index.md` deterministically from frontmatter |
@@ -306,7 +326,8 @@ claude-memory-compiler/
 ├── hooks\
 │   ├── session-end.ps1
 │   ├── session-start.ps1
-│   └── pre-compact.ps1
+│   ├── pre-compact.ps1
+│   └── user-prompt-submit.ps1
 ├── scripts\
 │   ├── _config.ps1          # paths + project/frontmatter helpers (dot-sourced)
 │   ├── _api.ps1             # Invoke-ClaudeCLI, Invoke-ParseFileOps
@@ -341,13 +362,14 @@ claude-memory-compiler/
 | Flush one session | ~$0.02–0.05 |
 | Compile one daily log | ~$0.45–0.65 |
 | Tag domains (one article) | ~$0.02–0.05 |
+| Domainize a prompt (per prompt) | ~$0.001–0.003 (Haiku) |
 | Retrocompile Fast (full archive) | ~$0.45–0.65 × number of days |
 | Retrocompile Quality (one session) | ~$0.02–0.05 |
 | Query the knowledge base | ~$0.15–0.25 |
 | Lint (structural only) | $0.00 |
 | Lint (with contradiction check) | ~$0.15–0.25 |
 
-Uses `claude-sonnet-4-6`. Model can be changed in `scripts\_config.ps1`.
+Compile/flush/tagging use `claude-sonnet-4-6`; prompt domainization uses `claude-haiku-4-5`. Models are set in `scripts\_config.ps1` (`$DEFAULT_MODEL`, `$DOMAINIZE_MODEL`).
 
 ---
 
