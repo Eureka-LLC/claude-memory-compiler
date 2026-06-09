@@ -6,13 +6,15 @@ function Invoke-ClaudeCLI {
     param(
         [Parameter(Mandatory)]
         [string]$Prompt,
-        [int]$MaxRetries = 4
+        [int]$MaxRetries = 4,
+        [string]$Model
     )
 
+    $useModel = if ($Model) { $Model } else { $DEFAULT_MODEL }
     $cliArgs = @("-p", "--output-format", "text")
-    if ($DEFAULT_MODEL) {
+    if ($useModel) {
         $cliArgs += "--model"
-        $cliArgs += $DEFAULT_MODEL
+        $cliArgs += $useModel
     }
 
     for ($attempt = 1; ; $attempt++) {
@@ -145,4 +147,50 @@ $Body
         if ($t -and ($t -in $Vocab) -and ($t -notin $picked)) { $picked += $t }
     }
     return @($picked)
+}
+
+# Classify a USER PROMPT for the UserPromptSubmit accrual hook. ONE cheap light-model
+# call returns BOTH: in-vocabulary domains (for accrual) AND a suspected out-of-vocabulary
+# domain candidate (for the gap log). Best-effort: 1 attempt, no retries — must never
+# block or fail the prompt. Returns @{ Domains = @(...); Gap = '<text or empty>' }.
+function Get-DomainsForPrompt {
+    param(
+        [Parameter(Mandatory)] [string]$Prompt,
+        [Parameter(Mandatory)] [string[]]$Vocab,
+        [string]$Model
+    )
+    $result = @{ Domains = @(); Gap = '' }
+    if (-not $Vocab -or $Vocab.Count -eq 0) { return $result }
+    if (-not $Prompt -or $Prompt.Trim().Length -lt 15) { return $result }
+
+    $useModel = if ($Model) { $Model } elseif ($DOMAINIZE_MODEL) { $DOMAINIZE_MODEL } else { $DEFAULT_MODEL }
+
+    $classify = @"
+Ты классификатор доменов знаний. Ниже запрос пользователя и ЗАКРЫТЫЙ список доменов:
+$($Vocab -join ', ')
+
+Ответь РОВНО двумя строками, без markdown и без пояснений:
+DOMAINS: ключи ИЗ СПИСКА через запятую, к которым по существу относится запрос (0–3, не натягивай); если ни один — поставь -
+GAP: если запрос явно про значимую область, которой НЕТ в списке — короткое имя-кандидат (1–3 слова, латиницей-через-дефис) и 3–6 слов почему; иначе поставь -
+
+## Запрос
+$Prompt
+"@
+    try { $resp = Invoke-ClaudeCLI -Prompt $classify -MaxRetries 1 -Model $useModel }
+    catch { return $result }
+
+    foreach ($line in ($resp -split '\r?\n')) {
+        $l = $line.Trim()
+        if ($l -match '^DOMAINS:\s*(.*)$') {
+            foreach ($tok in ($matches[1] -split '[,;]+')) {
+                $t = $tok.Trim().Trim('`', '"', "'", ' ').ToLower()
+                if ($t -and ($t -in $Vocab) -and ($t -notin $result.Domains)) { $result.Domains += $t }
+            }
+        }
+        elseif ($l -match '^GAP:\s*(.*)$') {
+            $g = $matches[1].Trim()
+            if ($g -and $g -ne '-') { $result.Gap = $g }
+        }
+    }
+    return $result
 }

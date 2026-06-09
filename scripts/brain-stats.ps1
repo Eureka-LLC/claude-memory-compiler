@@ -24,8 +24,11 @@ if ($total -eq 0) {
     exit 0
 }
 
+$reg     = Load-Registry
+$domains = if ($reg.ContainsKey($key)) { @($reg[$key]['domains']) } else { @() }
+
 # When the project is unknown (home dir / no repo) session-start injects everything.
-$kept = if ($key -eq 'unknown') { @($rows) } else { @($rows | Where-Object { Test-RowInjected $_ $key }) }
+$kept = if ($key -eq 'unknown') { @($rows) } else { @($rows | Where-Object { Test-RowInjected $_ $key $domains }) }
 $cut  = $total - $kept.Count
 
 $globalN = @($kept | Where-Object { $_.scope -eq 'global'  }).Count
@@ -38,8 +41,6 @@ $text  = (@($kept | ForEach-Object { $_.raw }) -join "`n")
 $chars = $text.Length
 $tok   = [int]([math]::Round($chars / 3.0))   # rough estimate for Cyrillic-heavy markdown
 
-$reg     = Load-Registry
-$domains = if ($reg.ContainsKey($key)) { @($reg[$key]['domains']) } else { @() }
 $domStr  = if ($domains.Count) { " · домены: $($domains -join ', ')" } else { " · домены не заданы" }
 
 Write-Host "🧠 Второй мозг — налог инжекта"

@@ -31,9 +31,12 @@ $STATE_FILE      = Join-Path $CLAUDE_DIR "state.json"
 $FLUSH_LOG       = Join-Path $CLAUDE_DIR "flush.log"
 $REGISTRY_FILE   = Join-Path $CLAUDE_DIR "projects.json"
 $DOMAINS_FILE    = Join-Path $CLAUDE_DIR "domains.md"
+$DOMAIN_GAPS_LOG = Join-Path $CLAUDE_DIR "domain-gaps.log"
 
 # --- Model / tuning ---
 $DEFAULT_MODEL      = "claude-sonnet-4-6"
+$DOMAINIZE_MODEL    = "claude-haiku-4-5"   # лёгкий классификатор промпт→домены (UserPromptSubmit)
+$DOMAIN_FILTER      = $true                 # инжект global фильтруется по доменам проекта (fail-closed); $false → весь global (прежнее поведение)
 $COMPILE_AFTER_HOUR = 18
 $MAX_TURNS          = 30
 $MAX_CONTEXT_CHARS  = 15000
@@ -160,6 +163,22 @@ function Add-ProjectToRegistry([string]$Key, [string]$Root) {
     Save-Registry $reg
 }
 
+# Union domains into a project's profile in the registry. Creates the entry if missing
+# (roots stay empty — session-end fills them). Returns only the domains actually added.
+function Add-DomainsToRegistry([string]$Key, [string[]]$Domains) {
+    if (-not $Key -or $Key -eq 'unknown') { return @() }
+    $incoming = @($Domains | Where-Object { $_ } | ForEach-Object { $_.ToLower() } | Select-Object -Unique)
+    if ($incoming.Count -eq 0) { return @() }
+    $reg = Load-Registry
+    if (-not $reg.ContainsKey($Key)) { $reg[$Key] = @{ roots = @(); domains = @() } }
+    $current = @($reg[$Key]['domains'])
+    $added   = @($incoming | Where-Object { $_ -notin $current })
+    if ($added.Count -eq 0) { return @() }
+    $reg[$Key]['domains'] = @($current + $added | Select-Object -Unique)
+    Save-Registry $reg
+    return $added
+}
+
 # Controlled domain vocabulary from domains.md: the first whitespace-token of each
 # non-comment line (hyphens kept, e.g. "legal-finance"). Lowercased, unique.
 function Get-DomainVocabulary {
@@ -242,10 +261,28 @@ function Get-IndexRows {
     return $rows
 }
 
-# Injection predicate: a row is injected if global (or legacy-blank scope) or belongs
-# to the current project. Shared so the filter and the /brain report always agree.
-function Test-RowInjected($Row, [string]$ProjKey) {
-    return ($Row.scope -eq 'global') -or ($Row.scope -eq '') -or ($ProjKey -and $Row.project -ieq $ProjKey)
+# Parse the index "Domains" cell into a lowercased domain list. Shared by the injection
+# predicate and the mid-session top-up so both read article domains identically.
+function Get-RowDomains($Row) {
+    return @(([string]$Row.domains) -split ',' | ForEach-Object { $_.Trim().Trim('[', ']', '"', "'", ' ').ToLower() } | Where-Object { $_ })
+}
+
+# Injection predicate, shared by session-start (inject) and brain-stats (/brain) so the
+# two never drift. A row injects if:
+#   • it belongs to the current project (project == ProjKey) — domain never gates it; OR
+#   • it is global (or legacy-blank scope) AND, when $DOMAIN_FILTER is on, its domains
+#     intersect the project's profile. Fail-closed: no article domains, or an empty
+#     project profile → the global row is NOT injected.
+function Test-RowInjected($Row, [string]$ProjKey, [string[]]$ProjDomains = @()) {
+    if ($ProjKey -and $Row.project -ieq $ProjKey) { return $true }
+    if ($Row.scope -ne 'global' -and $Row.scope -ne '') { return $false }
+    if (-not $DOMAIN_FILTER) { return $true }
+    if (@($ProjDomains).Count -eq 0) { return $false }
+
+    $pd = @($ProjDomains | ForEach-Object { ([string]$_).Trim().ToLower() } | Where-Object { $_ })
+    $rd = Get-RowDomains $Row
+    foreach ($d in $rd) { if ($d -in $pd) { return $true } }
+    return $false
 }
 
 # Set (replace or insert) one `Key: Value` line inside a file's YAML frontmatter.

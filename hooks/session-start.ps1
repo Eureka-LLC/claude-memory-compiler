@@ -45,13 +45,13 @@ function Get-RecentLog {
 # Keep only rows where Scope == global (or blank legacy) OR Project == current project.
 # Rules (type == rule) are surfaced first. Uses the shared parser/predicate in _config
 # so the injected set always matches what /brain reports.
-function Get-FilteredIndex([string]$ProjKey) {
+function Get-FilteredIndex([string]$ProjKey, [string[]]$ProjDomains) {
     $rows = Get-IndexRows
     if ($rows.Count -eq 0) { return "(empty — no articles compiled yet)" }
     # Real header+separator from the index file → never drifts from reindex columns.
     $tableLines = @(Get-Content $INDEX_FILE -Encoding UTF8 | Where-Object { $_ -match '^\s*\|' })
     $header = (@($tableLines | Select-Object -First 2)) -join "`n"
-    $kept   = @($rows | Where-Object { Test-RowInjected $_ $ProjKey })
+    $kept   = @($rows | Where-Object { Test-RowInjected $_ $ProjKey $ProjDomains })
     $rules  = @($kept | Where-Object { $_.type -eq 'rule' })
     $others = @($kept | Where-Object { $_.type -ne 'rule' })
     return "$header`n" + ((@($rules) + @($others) | ForEach-Object { $_.raw }) -join "`n")
@@ -60,15 +60,26 @@ function Get-FilteredIndex([string]$ProjKey) {
 $parts = [System.Collections.Generic.List[string]]::new()
 $parts.Add("## Today`n$((Get-Date).ToString('dddd, MMMM dd, yyyy'))")
 
+# Project domain profile (drives the global-scope domain filter + the header line).
+$projDomains = @()
+if ($projKey) {
+    $reg = Load-Registry
+    if ($reg.ContainsKey($projKey)) { $projDomains = @($reg[$projKey]['domains']) }
+}
+
 $indexBlock = if (-not (Test-Path $INDEX_FILE)) {
     "(empty — no articles compiled yet)"
 } elseif ($projKey) {
-    Get-FilteredIndex $projKey            # filter by current project
+    Get-FilteredIndex $projKey $projDomains       # filter by project + domains
 } else {
     Get-Content $INDEX_FILE -Raw -Encoding UTF8   # no cwd → inject everything (no regression)
 }
 $projNote = if ($projKey) { " (проект: $projKey)" } else { "" }
-$parts.Add("## Knowledge Base Index$projNote`n`n$indexBlock")
+$domLine = ""
+if ($projKey) {
+    $domLine = if ($projDomains.Count) { "_Домены проекта:_ " + ($projDomains -join ', ') + "`n`n" } else { "_Домены проекта: не заданы_`n`n" }
+}
+$parts.Add("## Knowledge Base Index$projNote`n`n$domLine$indexBlock")
 
 $parts.Add("## Recent Daily Log`n`n$(Get-RecentLog)")
 
