@@ -99,7 +99,7 @@ try {
         Write-Host $answer
         Write-Host ""
 
-        $opsCount = Invoke-ParseFileOps -Text $response -RootDir $ROOT_DIR
+        $opsCount = Invoke-ParseFileOps -Text $response -RootDir $CLAUDE_DIR
         $state = Load-State
         $state['query_count'] = ($state['query_count'] ?? 0) + 1
         Save-State $state
