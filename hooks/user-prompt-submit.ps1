@@ -27,14 +27,8 @@ $REPO_DIR = Split-Path $PSScriptRoot -Parent
 $projKey = ""
 $prompt  = ""
 try {
-    $rawIn = [Console]::In.ReadToEnd()
-    if ($rawIn) {
-        try { $hookInput = $rawIn | ConvertFrom-Json }
-        catch {
-            # Fallback: some inputs arrive with un-escaped Windows backslashes in cwd.
-            $fixed     = $rawIn -replace '(?<!\\)\\(?!["\\/bfnrtu])', '\\\\'
-            $hookInput = $fixed | ConvertFrom-Json
-        }
+    $hookInput = Read-HookStdin
+    if ($hookInput) {
         if ($hookInput.cwd)    { $projKey = Get-ProjectKey $hookInput.cwd }
         if ($hookInput.prompt) { $prompt  = [string]$hookInput.prompt }
     }

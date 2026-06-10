@@ -20,12 +20,9 @@ function Write-Log([string]$Level, [string]$Msg) {
     "$ts $Level [pre-compact] $Msg" | Add-Content -Path $FLUSH_LOG -Encoding UTF8
 }
 
-try {
-    $rawInput = [Console]::In.ReadToEnd()
-    $rawInput = $rawInput -replace '(?<!\\)\\(?!["\\/bfnrtu])', '\\\\'
-    $hookInput = $rawInput | ConvertFrom-Json
-} catch {
-    Write-Log "ERROR" "Failed to parse stdin: $_"
+$hookInput = Read-HookStdin
+if (-not $hookInput) {
+    Write-Log "ERROR" "Failed to parse stdin"
     exit 0
 }
 

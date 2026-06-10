@@ -62,7 +62,26 @@ function Load-State {
 }
 
 function Save-State([hashtable]$State) {
-    $State | ConvertTo-Json -Depth 10 | Set-Content -Path $STATE_FILE -Encoding UTF8
+    # Atomic write: serialize to a temp file then rename over the target. A crash or a
+    # concurrent writer (the end-of-day compile spawn) can no longer leave a half-written
+    # state.json that Load-State would silently reset to defaults.
+    $tmp = "$STATE_FILE.tmp"
+    $State | ConvertTo-Json -Depth 10 | Set-Content -Path $tmp -Encoding UTF8
+    Move-Item -Path $tmp -Destination $STATE_FILE -Force
+}
+
+# Read and parse hook stdin JSON. Tries a clean parse first (the normal case — valid JSON);
+# only on failure applies a best-effort fix for un-escaped Windows backslashes (a lone "\"
+# in cwd) and retries. Valid input is never mangled. Returns the parsed object, or $null.
+# Shared by all four hooks so they handle stdin identically.
+function Read-HookStdin {
+    $raw = [Console]::In.ReadToEnd()
+    if (-not $raw) { return $null }
+    try { return ($raw | ConvertFrom-Json) } catch {}
+    try {
+        $fixed = $raw -replace '(?<!\\)\\(?!["\\/bfnrtu])', '\\'
+        return ($fixed | ConvertFrom-Json)
+    } catch { return $null }
 }
 
 # Resolve a Python 3 launcher for the optional Excel-review tooling (needs openpyxl).
@@ -243,7 +262,10 @@ function Get-IndexRows {
     $col = @{}
     foreach ($line in (Get-Content $INDEX_FILE -Encoding UTF8)) {
         if ($line -notmatch '^\s*\|') { continue }
-        $cells = ($line.Trim().Trim('|') -split '\|') | ForEach-Object { $_.Trim() }
+        # Split on unescaped pipes only, then un-escape "\|" back to "|" — reindex's
+        # Format-Cell escapes literal pipes in a cell, so a pipe inside a summary must not
+        # be read as a column boundary (which would shift every later column).
+        $cells = ($line.Trim().Trim('|') -split '(?<!\\)\|') | ForEach-Object { ($_.Trim()) -replace '\\\|', '|' }
         if (-not $headerParsed) {
             for ($i = 0; $i -lt $cells.Count; $i++) { $col[$cells[$i].ToLower()] = $i }
             $headerParsed = $true; continue

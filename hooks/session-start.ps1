@@ -21,12 +21,8 @@ $MAX_LOG_LINES     = 30
 # --- Current project from hook stdin (cwd) ---
 $projKey = ""
 try {
-    $rawIn = [Console]::In.ReadToEnd()
-    if ($rawIn) {
-        $rawIn     = $rawIn -replace '(?<!\\)\\(?!["\\/bfnrtu])', '\\\\'
-        $hookInput = $rawIn | ConvertFrom-Json
-        if ($hookInput.cwd) { $projKey = Get-ProjectKey $hookInput.cwd }
-    }
+    $hookInput = Read-HookStdin
+    if ($hookInput -and $hookInput.cwd) { $projKey = Get-ProjectKey $hookInput.cwd }
 } catch { $projKey = "" }
 
 function Get-RecentLog {
