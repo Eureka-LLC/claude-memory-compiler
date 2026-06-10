@@ -79,7 +79,7 @@ if (-not (Test-Path $ContextFile)) {
 $flushState = Load-FlushState
 $lastTs     = $flushState['timestamp']
 if ($flushState['session_id'] -eq $SessionId -and
-    $lastTs -and ((Get-Date) - [DateTimeOffset]::FromUnixTimeSeconds($lastTs)).TotalSeconds -lt 60) {
+    $lastTs -and (([DateTimeOffset]::Now - [DateTimeOffset]::FromUnixTimeSeconds($lastTs)).TotalSeconds -lt 60)) {
     Write-FlushLog "INFO" "Skipping duplicate flush for session $SessionId"
     Remove-Item $ContextFile -Force -ErrorAction SilentlyContinue
     exit 0
@@ -183,10 +183,16 @@ if ($hour -ge $COMPILE_AFTER_HOUR) {
         if (-not $alreadyCompiled) {
             Write-FlushLog "INFO" "Triggering end-of-day compilation (after ${COMPILE_AFTER_HOUR}:00)"
             try {
+                # Per-process log names ($PID) so two near-simultaneous spawns don't contend
+                # for one compile.log; capture stderr too; -NoProfile to match the other spawns.
+                $tag    = "$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$PID"
+                $outLog = Join-Path $CLAUDE_DIR "compile-$tag.out.log"
+                $errLog = Join-Path $CLAUDE_DIR "compile-$tag.err.log"
                 Start-Process -FilePath "pwsh" `
-                    -ArgumentList @("-NonInteractive", "-File", "`"$compilePs`"", "-Log", "`"$logPath`"") `
+                    -ArgumentList @("-NoProfile", "-NonInteractive", "-File", "`"$compilePs`"", "-Log", "`"$logPath`"") `
                     -WindowStyle Hidden `
-                    -RedirectStandardOutput (Join-Path $CLAUDE_DIR "compile.log")
+                    -RedirectStandardOutput $outLog `
+                    -RedirectStandardError $errLog
             }
             catch {
                 Write-FlushLog "ERROR" "Failed to spawn compile.ps1: $_"
