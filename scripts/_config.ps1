@@ -30,6 +30,7 @@ $KB_LOG_FILE     = Join-Path $KNOWLEDGE_DIR "log.md"
 $STATE_FILE      = Join-Path $CLAUDE_DIR "state.json"
 $FLUSH_LOG       = Join-Path $CLAUDE_DIR "flush.log"
 $REGISTRY_FILE   = Join-Path $CLAUDE_DIR "projects.json"
+$RETRO_STATE_FILE = Join-Path $CLAUDE_DIR "retro-processed.json"
 $DOMAINS_FILE    = Join-Path $CLAUDE_DIR "domains.md"
 $DOMAIN_GAPS_LOG = Join-Path $CLAUDE_DIR "domain-gaps.log"
 
@@ -106,6 +107,21 @@ function Read-HookStdin {
         $fixed = $raw -replace '(?<!\\)\\(?!["\\/bfnrtu])', '\\'
         return ($fixed | ConvertFrom-Json)
     } catch { return $null }
+}
+
+# retro-processed.json: which transcript sessions are already in the daily logs.
+# Written by retrocompile (batch) AND flush (live hook), so the schema lives here.
+function Load-RetroState {
+    if (Test-Path $RETRO_STATE_FILE) {
+        try { return (Get-Content $RETRO_STATE_FILE -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable) }
+        catch {}
+    }
+    return @{ processed = @{} }
+}
+
+function Save-RetroState([hashtable]$State) {
+    if (-not $State.ContainsKey('processed')) { $State['processed'] = @{} }
+    $State | ConvertTo-Json -Depth 5 | Set-Content -Path $RETRO_STATE_FILE -Encoding UTF8
 }
 
 # Resolve a Python 3 launcher for the optional Excel-review tooling (needs openpyxl).
@@ -306,6 +322,21 @@ function Get-IndexHeader {
     if (-not (Test-Path $INDEX_FILE)) { return "" }
     $tableLines = @(Get-Content $INDEX_FILE -Encoding UTF8 | Where-Object { $_ -match '^\s*\|' })
     return (@($tableLines | Select-Object -First 2)) -join "`n"
+}
+
+# Serialize the whole knowledge base (index + every article) for LLM prompts.
+# Shared by compile and query; $EmptyIndexText is what to show when index.md is missing.
+function Get-AllWikiContent([string]$EmptyIndexText = "(empty — no articles compiled yet)") {
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $idxContent = if (Test-Path $INDEX_FILE) { Get-Content $INDEX_FILE -Raw -Encoding UTF8 } else { $EmptyIndexText }
+    $parts.Add("## INDEX`n`n$idxContent")
+
+    foreach ($md in (Get-AllArticles -IncludeQa)) {
+        $rel     = $md.FullName.Substring($KNOWLEDGE_DIR.Length).TrimStart('\', '/')
+        $content = Get-Content $md.FullName -Raw -Encoding UTF8
+        $parts.Add("## $rel`n`n$content")
+    }
+    return $parts -join "`n`n---`n`n"
 }
 
 # Pragmatic YAML-frontmatter reader. Returns a hashtable of scalar fields (lowercased

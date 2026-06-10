@@ -130,6 +130,45 @@ function Invoke-FileTool {
     }
 }
 
+# Summarize a conversation context into the structured daily-log entry. ONE prompt
+# shared by the live flush (flush.ps1) and retrocompile's Quality mode, so the
+# daily-log shape and the FLUSH_OK sentinel never drift between the two writers.
+# Returns the raw LLM text ("FLUSH_OK" when nothing is worth saving).
+function Get-FlushSummary {
+    param([Parameter(Mandatory)][string]$Context)
+
+    $prompt = @"
+Проанализируй контекст разговора ниже и ответь кратким резюме важных моментов для сохранения в дневном логе.
+Не используй никакие инструменты — только обычный текст.
+ВАЖНО: Отвечай ТОЛЬКО на русском языке.
+
+Оформи ответ как структурированную запись дневного лога с разделами:
+
+**Контекст:** [Одна строка о том, чем занимался пользователь]
+
+**Ключевые обмены:**
+- [Важные вопросы и ответы, обсуждения]
+
+**Принятые решения:**
+- [Любые решения с обоснованием]
+
+**Выводы:**
+- [Подводные камни, паттерны, инсайты]
+
+**Задачи:**
+- [Упомянутые последующие шаги или TODO]
+
+Пропускай рутинные вызовы инструментов, тривиальные чтения файлов и очевидный back-and-forth.
+Включай только разделы с реальным содержимым.
+Если ничего не стоит сохранять, ответь ровно: FLUSH_OK
+
+## Контекст разговора
+
+$Context
+"@
+    return Invoke-ClaudeCLI -Prompt $prompt
+}
+
 # Classify an article body into knowledge DOMAINS, picking ONLY from the controlled
 # vocabulary (domains.md). Returns a (possibly empty) array of vocab keys. The vocab
 # filter is deterministic — anything the LLM returns outside the vocabulary is dropped.

@@ -93,7 +93,7 @@ param(
 
 $env:CLAUDE_INVOKED_BY = "retro_compile"
 
-$RETRO_STATE_FILE = Join-Path $CLAUDE_DIR "retro-processed.json"
+# $RETRO_STATE_FILE + Load/Save-RetroState live in _config.ps1 (shared with flush.ps1).
 $TRANSCRIPTS_ROOT = Join-Path $env:USERPROFILE ".claude\projects"
 
 # ---------------------------------------------------------------------------
@@ -103,18 +103,6 @@ $TRANSCRIPTS_ROOT = Join-Path $env:USERPROFILE ".claude\projects"
 function Write-RetroLog([string]$Level, [string]$Msg) {
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     "$ts $Level [retrocompile] $Msg" | Add-Content -Path $FLUSH_LOG -Encoding UTF8
-}
-
-function Load-RetroState {
-    if (Test-Path $RETRO_STATE_FILE) {
-        try { return (Get-Content $RETRO_STATE_FILE -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable) }
-        catch {}
-    }
-    return @{ processed = @{} }
-}
-
-function Save-RetroState([hashtable]$State) {
-    $State | ConvertTo-Json -Depth 5 | Set-Content -Path $RETRO_STATE_FILE -Encoding UTF8
 }
 
 # Get-ProjectLabel and the transcript parser moved to _config.ps1 (shared with hooks):
@@ -136,45 +124,8 @@ function Append-RetroEntry([string]$LogPath, [string]$Content, [string]$TimeStr,
     [System.IO.File]::AppendAllText($LogPath, $entry, [System.Text.Encoding]::UTF8)
 }
 
-function Get-QualitySummary([string]$Context) {
-    $prevEncoding = [Console]::OutputEncoding
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    try {
-        $prompt = @"
-Проанализируй контекст разговора ниже и ответь кратким резюме важных моментов для сохранения в дневном логе.
-Не используй никакие инструменты — только обычный текст.
-ВАЖНО: Отвечай ТОЛЬКО на русском языке.
-
-Оформи ответ как структурированную запись дневного лога с разделами:
-
-**Контекст:** [Одна строка о том, чем занимался пользователь]
-
-**Ключевые обмены:**
-- [Важные вопросы и ответы, обсуждения]
-
-**Принятые решения:**
-- [Любые решения с обоснованием]
-
-**Выводы:**
-- [Подводные камни, паттерны, инсайты]
-
-**Задачи:**
-- [Упомянутые последующие шаги или TODO]
-
-Пропускай рутинные вызовы инструментов, тривиальные чтения файлов и очевидный back-and-forth.
-Включай только разделы с реальным содержимым.
-Если ничего не стоит сохранять, ответь ровно: FLUSH_OK
-
-## Контекст разговора
-
-$Context
-"@
-        return Invoke-ClaudeCLI -Prompt $prompt
-    }
-    finally {
-        [Console]::OutputEncoding = $prevEncoding
-    }
-}
+# Get-QualitySummary replaced by the shared Get-FlushSummary in _api.ps1 (same prompt
+# as the live flush, so the daily-log entry shape never drifts).
 
 # ---------------------------------------------------------------------------
 # Main
@@ -306,7 +257,7 @@ foreach ($file in $allFiles) {
 
             try {
                 if ($Mode -eq "Quality") {
-                    $summary = Get-QualitySummary -Context $context
+                    $summary = Get-FlushSummary -Context $context
                     if ($summary -match "^\s*FLUSH_OK\s*$") {
                         Write-Host "         → ничего ценного (FLUSH_OK)" -ForegroundColor DarkGray
                         $flushedOk++

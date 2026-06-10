@@ -19,24 +19,7 @@ param(
 
 $env:CLAUDE_INVOKED_BY = "memory_query"
 
-function Get-AllWikiContent {
-    $parts = [System.Collections.Generic.List[string]]::new()
-    $idxContent = if (Test-Path $INDEX_FILE) {
-        Get-Content $INDEX_FILE -Raw -Encoding UTF8
-    } else { "(empty — no articles compiled yet)" }
-    $parts.Add("## INDEX`n`n$idxContent")
-
-    foreach ($subdir in @($CONCEPTS_DIR, $CONNECTIONS_DIR, $QA_DIR)) {
-        if (-not (Test-Path $subdir)) { continue }
-        foreach ($md in (Get-ChildItem $subdir -Filter "*.md" | Sort-Object Name)) {
-            $rel     = $md.FullName.Substring($KNOWLEDGE_DIR.Length).TrimStart('\', '/')
-            $content = Get-Content $md.FullName -Raw -Encoding UTF8
-            $parts.Add("## $rel`n`n$content")
-        }
-    }
-    return $parts -join "`n`n---`n`n"
-}
-
+# Get-AllWikiContent moved to _config.ps1 (shared with compile.ps1).
 $wikiContent = Get-AllWikiContent
 $timestamp   = Get-NowIso
 
