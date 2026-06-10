@@ -70,6 +70,30 @@ function Save-State([hashtable]$State) {
     Move-Item -Path $tmp -Destination $STATE_FILE -Force
 }
 
+# Cross-process-safe read-modify-write of state.json. Holds a named mutex (keyed to the
+# state-file path) only for the brief reload→mutate→save window, so two concurrent runs
+# (e.g. the end-of-day compile spawn racing a manual compile, or compile vs its child
+# tag-domains) can't lose each other's updates the way Load→…→Save in each process would.
+# $Mutator receives the freshly-reloaded [hashtable] and mutates it in place.
+function Update-State([scriptblock]$Mutator) {
+    $keyHash = [System.BitConverter]::ToString(
+        [System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($STATE_FILE))
+    ).Replace('-', '').Substring(0, 16)
+    $mutex = [System.Threading.Mutex]::new($false, "Global\cmc_state_$keyHash")
+    $owned = $false
+    try {
+        # AbandonedMutex = a previous holder died mid-write; we still get ownership.
+        try { $owned = $mutex.WaitOne(10000) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+        $state = Load-State
+        & $Mutator $state
+        Save-State $state
+        return $state
+    } finally {
+        if ($owned) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
 # Read and parse hook stdin JSON. Tries a clean parse first (the normal case — valid JSON);
 # only on failure applies a best-effort fix for un-escaped Windows backslashes (a lone "\"
 # in cwd) and retries. Valid input is never mangled. Returns the parsed object, or $null.

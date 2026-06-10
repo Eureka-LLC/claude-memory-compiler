@@ -149,12 +149,13 @@ foreach ($logPath in @($toCompile)) {
     try {
         Invoke-CompileLog -LogPath $logPath
 
-        if (-not $state.ContainsKey('ingested')) { $state['ingested'] = @{} }
-        $state['ingested'][$leafName] = @{
-            hash        = Get-FileHash256 $logPath
-            compiled_at = Get-NowIso
+        $logHash    = Get-FileHash256 $logPath
+        $compiledAt = Get-NowIso
+        $state = Update-State {
+            param($s)
+            if (-not $s.ContainsKey('ingested')) { $s['ingested'] = @{} }
+            $s['ingested'][$leafName] = @{ hash = $logHash; compiled_at = $compiledAt }
         }
-        Save-State $state
         Write-Host "  Done."
     }
     catch {

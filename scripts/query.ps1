@@ -100,9 +100,7 @@ try {
         Write-Host ""
 
         $opsCount = Invoke-ParseFileOps -Text $response -RootDir $CLAUDE_DIR -AllowedSubdir 'knowledge'
-        $state = Load-State
-        $state['query_count'] = ($state['query_count'] ?? 0) + 1
-        Save-State $state
+        Update-State { param($s) $s['query_count'] = ([int]($s['query_count'] ?? 0)) + 1 } | Out-Null
 
         Write-Host "`n$("-" * 60)"
         $qaCount = if (Test-Path $QA_DIR) { @(Get-ChildItem $QA_DIR -Filter "*.md").Count } else { 0 }
@@ -110,9 +108,7 @@ try {
     }
     else {
         Write-Host $response
-        $state = Load-State
-        $state['query_count'] = ($state['query_count'] ?? 0) + 1
-        Save-State $state
+        Update-State { param($s) $s['query_count'] = ([int]($s['query_count'] ?? 0)) + 1 } | Out-Null
     }
 }
 catch {

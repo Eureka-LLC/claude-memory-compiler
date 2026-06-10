@@ -440,18 +440,15 @@ if ($NoCompile) {
 Write-Host ""
 Write-Host "Компилирую $($modifiedDates.Count) дневных лог(а) в knowledge base..." -ForegroundColor Cyan
 $compilePs = Join-Path $SCRIPTS_DIR "compile.ps1"
-$state     = Load-State
 
 $compileErrors = 0
 foreach ($date in ($modifiedDates | Sort-Object)) {
     $logPath = Join-Path $DAILY_DIR "$date.md"
     Write-Host "`n  $date.md"
 
-    # Force recompile by clearing cached hash
-    if ($state.ContainsKey('ingested') -and $state['ingested'].ContainsKey("$date.md")) {
-        $state['ingested'].Remove("$date.md")
-        Save-State $state
-    }
+    # Force recompile by clearing the cached hash — atomic, because the compile spawned
+    # below writes ingested between iterations and a stale in-memory snapshot would clobber it.
+    Update-State { param($s) if ($s.ContainsKey('ingested')) { $s['ingested'].Remove("$date.md") } } | Out-Null
 
     try {
         & pwsh -NonInteractive -File $compilePs -Log $logPath

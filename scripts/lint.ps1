@@ -317,10 +317,8 @@ $reportPath = Join-Path $REPORTS_DIR "lint-$today.md"
 [System.IO.File]::WriteAllText($reportPath, $report, [System.Text.Encoding]::UTF8)
 Write-Host "`nReport saved to: $reportPath"
 
-# Update state
-$state = Load-State
-$state['last_lint'] = Get-NowIso
-Save-State $state
+# Update state (atomic — a concurrent compile may be writing ingested at the same time)
+Update-State { param($s) $s['last_lint'] = Get-NowIso } | Out-Null
 
 Write-Host "`nResults: $($errors.Count) errors, $($warnings.Count) warnings, $($suggestions.Count) suggestions"
 if ($errors.Count -gt 0) { Write-Host "`nErrors found — knowledge base needs attention!"; exit 1 }
