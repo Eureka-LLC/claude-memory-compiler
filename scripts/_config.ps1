@@ -321,7 +321,17 @@ function Set-FrontmatterField([string]$Raw, [string]$Key, [string]$Value) {
     $newLine = "${Key}: ${Value}"
     $escKey  = [regex]::Escape($Key)
     for ($i = 1; $i -lt $endIdx; $i++) {
-        if ($lines[$i] -match "^\s*$escKey\s*:") { $lines[$i] = $newLine; return ($lines -join $nl) }
+        if ($lines[$i] -match "^\s*$escKey\s*:") {
+            $lines[$i] = $newLine
+            # If the old value was a YAML block list (domains:\n  - foo\n  - bar), drop its
+            # "- item" continuation lines so they don't dangle under the new inline value
+            # and corrupt the frontmatter. Stops at the next key (no leading "- ").
+            $j = $i + 1
+            while ($j -lt $endIdx -and $lines[$j] -match '^\s+-\s') {
+                $lines.RemoveAt($j); $endIdx--
+            }
+            return ($lines -join $nl)
+        }
     }
     # not present — insert before the first of sources/created/updated (keeps block lists last)
     $insertAt = $endIdx
