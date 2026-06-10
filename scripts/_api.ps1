@@ -49,7 +49,8 @@ function Invoke-ParseFileOps {
         [Parameter(Mandatory)]
         [string]$Text,
         [Parameter(Mandatory)]
-        [string]$RootDir
+        [string]$RootDir,
+        [string]$AllowedSubdir = ""
     )
 
     $pattern = [regex]::new(
@@ -68,7 +69,7 @@ function Invoke-ParseFileOps {
 
         $result = Invoke-FileTool -ToolName ($action.ToLower() + "_file") `
             -ToolInput @{ path = $relPath; content = $content } `
-            -RootDir $RootDir
+            -RootDir $RootDir -AllowedSubdir $AllowedSubdir
         Write-Host "    $result"
         $count++
     }
@@ -83,11 +84,15 @@ function Invoke-FileTool {
         [Parameter(Mandatory)]
         $ToolInput,
         [Parameter(Mandatory)]
-        [string]$RootDir
+        [string]$RootDir,
+        [string]$AllowedSubdir = ""
     )
 
     $path = $ToolInput.path
     if (-not [System.IO.Path]::IsPathRooted($path)) {
+        # A ':' in a relative path means a drive-relative path (C:foo) or an NTFS alternate
+        # data stream (a.md:hidden) — neither is a legitimate knowledge-base file op.
+        if ($path.Contains(':')) { return "Error: suspicious ':' in relative path '$path'." }
         $path = Join-Path $RootDir $path
     }
     $realPath = [System.IO.Path]::GetFullPath($path)
@@ -96,6 +101,15 @@ function Invoke-FileTool {
     $sep = [System.IO.Path]::DirectorySeparatorChar
     if (-not $realPath.StartsWith($realRoot + $sep) -and $realPath -ne $realRoot) {
         return "Error: '$realPath' is outside project directory."
+    }
+    # Optional allowlist: confine writes to one subdirectory (compile/query pass 'knowledge'),
+    # so a prompt-injected <<<WRITE>>> can't reach domains.md / projects.json / state.json,
+    # which live in $CLAUDE_DIR but outside knowledge/.
+    if ($AllowedSubdir) {
+        $realAllowed = [System.IO.Path]::GetFullPath((Join-Path $realRoot $AllowedSubdir))
+        if (-not $realPath.StartsWith($realAllowed + $sep) -and $realPath -ne $realAllowed) {
+            return "Error: '$realPath' is outside allowed subdir '$AllowedSubdir'."
+        }
     }
 
     $dir = [System.IO.Path]::GetDirectoryName($realPath)

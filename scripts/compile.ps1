@@ -101,7 +101,7 @@ $logContent
 
     Write-Host "  Calling claude CLI..."
     $response = Invoke-ClaudeCLI -Prompt $prompt
-    $opsCount = Invoke-ParseFileOps -Text $response -RootDir $CLAUDE_DIR
+    $opsCount = Invoke-ParseFileOps -Text $response -RootDir $CLAUDE_DIR -AllowedSubdir 'knowledge'
     Write-Host "  Executed $opsCount file operation(s)"
 }
 
