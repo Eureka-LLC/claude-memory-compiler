@@ -36,15 +36,6 @@ function Get-RelPath([string]$FullPath) {
     $FullPath.Substring($KNOWLEDGE_DIR.Length).TrimStart('\', '/')
 }
 
-function Count-InboundLinks([string]$Target) {
-    $count = 0
-    foreach ($article in Get-AllArticles) {
-        $content = Get-Content $article.FullName -Raw -Encoding UTF8
-        if ($content -match [regex]::Escape("[[$Target]]")) { $count++ }
-    }
-    return $count
-}
-
 # --- Check functions ---
 
 function Check-BrokenLinks {
@@ -64,11 +55,23 @@ function Check-BrokenLinks {
 }
 
 function Check-OrphanPages {
-    $issues = @()
-    foreach ($article in Get-AllArticles) {
+    $issues   = @()
+    $articles = Get-AllArticles
+    # Collect every outbound link target once (O(n) reads instead of O(n^2)). Skip an
+    # article's link to itself so a page that only self-references still reads as an orphan.
+    $linked = @{}
+    foreach ($article in $articles) {
+        $self    = ((Get-RelPath $article.FullName) -replace '\.md$', '') -replace '\\', '/'
+        $content = Get-Content $article.FullName -Raw -Encoding UTF8
+        foreach ($link in (Get-Wikilinks $content)) {
+            if ($link.StartsWith('daily/') -or $link -eq $self) { continue }
+            $linked[$link] = $true
+        }
+    }
+    foreach ($article in $articles) {
         $rel    = Get-RelPath $article.FullName
-        $target = $rel -replace '\.md$', '' -replace '\\', '/'
-        if ((Count-InboundLinks $target) -eq 0) {
+        $target = ($rel -replace '\.md$', '') -replace '\\', '/'
+        if (-not $linked.ContainsKey($target)) {
             $issues += @{ severity = "warning"; check = "orphan_page"; file = $rel;
                 detail = "Orphan page: no other articles link to [[$target]]" }
         }
