@@ -180,8 +180,5 @@ if (Test-Path $reindexPs) {
     try { & $reindexPs } catch { Write-Host "  WARNING: reindex.ps1 failed — index may be stale: $_" }
 }
 
-$articles = @()
-foreach ($subdir in @($CONCEPTS_DIR, $CONNECTIONS_DIR, $QA_DIR)) {
-    if (Test-Path $subdir) { $articles += Get-ChildItem $subdir -Filter "*.md" }
-}
+$articles = @(Get-AllArticles -IncludeQa)
 Write-Host "`nDone. Knowledge base: $($articles.Count) articles"

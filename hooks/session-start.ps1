@@ -45,8 +45,7 @@ function Get-FilteredIndex([string]$ProjKey, [string[]]$ProjDomains) {
     $rows = Get-IndexRows
     if ($rows.Count -eq 0) { return "(empty — no articles compiled yet)" }
     # Real header+separator from the index file → never drifts from reindex columns.
-    $tableLines = @(Get-Content $INDEX_FILE -Encoding UTF8 | Where-Object { $_ -match '^\s*\|' })
-    $header = (@($tableLines | Select-Object -First 2)) -join "`n"
+    $header = Get-IndexHeader
     $kept   = @($rows | Where-Object { Test-RowInjected $_ $ProjKey $ProjDomains })
     $rules  = @($kept | Where-Object { $_.type -eq 'rule' })
     $others = @($kept | Where-Object { $_.type -ne 'rule' })

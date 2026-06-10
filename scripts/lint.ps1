@@ -24,13 +24,7 @@ function Test-WikiArticleExists([string]$Link) {
     Test-Path (Join-Path $KNOWLEDGE_DIR "$Link.md")
 }
 
-function Get-AllArticles {
-    $result = @()
-    foreach ($subdir in @($CONCEPTS_DIR, $CONNECTIONS_DIR, $QA_DIR)) {
-        if (Test-Path $subdir) { $result += Get-ChildItem $subdir -Filter "*.md" }
-    }
-    return $result
-}
+# Get-AllArticles moved to _config.ps1 (shared) — lint calls it with -IncludeQa.
 
 function Get-RelPath([string]$FullPath) {
     $FullPath.Substring($KNOWLEDGE_DIR.Length).TrimStart('\', '/')
@@ -40,7 +34,7 @@ function Get-RelPath([string]$FullPath) {
 
 function Check-BrokenLinks {
     $issues = @()
-    foreach ($article in Get-AllArticles) {
+    foreach ($article in Get-AllArticles -IncludeQa) {
         $content = Get-Content $article.FullName -Raw -Encoding UTF8
         $rel     = Get-RelPath $article.FullName
         foreach ($link in Get-Wikilinks $content) {
@@ -56,12 +50,12 @@ function Check-BrokenLinks {
 
 function Check-OrphanPages {
     $issues   = @()
-    $articles = Get-AllArticles
+    $articles = Get-AllArticles -IncludeQa
     # Collect every outbound link target once (O(n) reads instead of O(n^2)). Skip an
     # article's link to itself so a page that only self-references still reads as an orphan.
     $linked = @{}
     foreach ($article in $articles) {
-        $self    = ((Get-RelPath $article.FullName) -replace '\.md$', '') -replace '\\', '/'
+        $self    = Get-ArticleKey $article.FullName
         $content = Get-Content $article.FullName -Raw -Encoding UTF8
         foreach ($link in (Get-Wikilinks $content)) {
             if ($link.StartsWith('daily/') -or $link -eq $self) { continue }
@@ -70,7 +64,7 @@ function Check-OrphanPages {
     }
     foreach ($article in $articles) {
         $rel    = Get-RelPath $article.FullName
-        $target = ($rel -replace '\.md$', '') -replace '\\', '/'
+        $target = Get-ArticleKey $article.FullName
         if (-not $linked.ContainsKey($target)) {
             $issues += @{ severity = "warning"; check = "orphan_page"; file = $rel;
                 detail = "Orphan page: no other articles link to [[$target]]" }
@@ -110,10 +104,10 @@ function Check-StaleArticles {
 
 function Check-MissingBacklinks {
     $issues = @()
-    foreach ($article in Get-AllArticles) {
+    foreach ($article in Get-AllArticles -IncludeQa) {
         $content    = Get-Content $article.FullName -Raw -Encoding UTF8
         $rel        = Get-RelPath $article.FullName
-        $sourceLink = ($rel -replace '\.md$', '') -replace '\\', '/'
+        $sourceLink = Get-ArticleKey $article.FullName
         foreach ($link in Get-Wikilinks $content) {
             if ($link.StartsWith("daily/")) { continue }
             $targetPath = Join-Path $KNOWLEDGE_DIR "$link.md"
@@ -132,7 +126,7 @@ function Check-MissingBacklinks {
 
 function Check-SparseArticles {
     $issues = @()
-    foreach ($article in Get-AllArticles) {
+    foreach ($article in Get-AllArticles -IncludeQa) {
         $content = Get-Content $article.FullName -Raw -Encoding UTF8
         # Strip YAML frontmatter at line boundaries (a `---` inside a value must not end it)
         $body = $content
@@ -162,7 +156,7 @@ function Check-ScopeAudit {
     $validScope = @('global', 'project')
     $validType  = @('concept', 'rule')
 
-    foreach ($article in Get-AllArticles) {
+    foreach ($article in Get-AllArticles -IncludeQa) {
         $rel = Get-RelPath $article.FullName
         if ($rel -match '^qa[\\/]') { continue }                       # qa/ exempt
         $isConnection = $rel -match '^connections[\\/]'
@@ -198,7 +192,7 @@ function Check-ScopeAudit {
 
 function Check-Contradictions {
     $parts = [System.Collections.Generic.List[string]]::new()
-    foreach ($article in Get-AllArticles) {
+    foreach ($article in Get-AllArticles -IncludeQa) {
         $rel     = Get-RelPath $article.FullName
         $content = Get-Content $article.FullName -Raw -Encoding UTF8
         $parts.Add("### $rel`n$content")

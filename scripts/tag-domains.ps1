@@ -32,20 +32,13 @@ $env:CLAUDE_INVOKED_BY = "memory_domains"
 $vocab = @(Get-DomainVocabulary)
 if ($vocab.Count -eq 0) { Write-Host "Словарь доменов пуст: $DOMAINS_FILE"; exit 1 }
 
-$articles = @()
-foreach ($d in @($CONCEPTS_DIR, $CONNECTIONS_DIR)) {
-    if (Test-Path $d) { $articles += Get-ChildItem $d -Filter "*.md" | Sort-Object Name }
-}
+$articles = @(Get-AllArticles)   # concepts + connections (qa is never domain-tagged)
 
 # True if the article already carries at least one real domain (not empty / not `[]`).
 function Test-HasDomains([string]$Raw) {
     $d = (Get-ArticleFields $Raw).domains
     if (-not $d) { return $false }
     return (($d -replace '[\[\]",\s]', '') -ne '')
-}
-
-function Get-Rel($Article) {
-    (($Article.FullName.Substring($KNOWLEDGE_DIR.Length).TrimStart('\', '/')) -replace '\\', '/') -replace '\.md$', ''
 }
 
 # --- Decide which articles need (re)classification via the content-hash store ---
@@ -57,7 +50,7 @@ $tagUpdates = @{}                        # writes accumulate here, applied atomi
 $toClassify = @()
 $skipped = 0; $seeded = 0
 foreach ($a in $articles) {
-    $rel = Get-Rel $a
+    $rel = Get-ArticleKey $a.FullName
     $cur = Get-FileHash256 $a.FullName
 
     if (-not $Force) {

@@ -81,9 +81,8 @@ try {
             (@($rd | Where-Object { $_ -in $oldDomains }).Count -eq 0)
         })
         if ($newRows.Count) {
-            $tableLines = @(Get-Content $INDEX_FILE -Encoding UTF8 | Where-Object { $_ -match '^\s*\|' })
-            $header     = (@($tableLines | Select-Object -First 2)) -join "`n"
-            $table      = "$header`n" + ((@($newRows | ForEach-Object { $_.raw })) -join "`n")
+            $header = Get-IndexHeader
+            $table  = "$header`n" + ((@($newRows | ForEach-Object { $_.raw })) -join "`n")
             $msg += "`n`nДогружены global-статьи новых доменов (стали релевантны прямо сейчас, $($newRows.Count) шт.):`n`n$table"
         }
     }

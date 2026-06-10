@@ -44,23 +44,19 @@ function Format-Cell([string]$s) {
 
 $rows = [System.Collections.Generic.List[string]]::new()
 
-foreach ($subdir in @($CONCEPTS_DIR, $CONNECTIONS_DIR, $QA_DIR)) {
-    if (-not (Test-Path $subdir)) { continue }
-    foreach ($md in (Get-ChildItem $subdir -Filter "*.md" | Sort-Object Name)) {
-        $raw     = Get-Content $md.FullName -Raw -Encoding UTF8
-        $f       = Get-ArticleFields $raw
-        $rel     = ($md.FullName.Substring($KNOWLEDGE_DIR.Length).TrimStart('\', '/')) -replace '\\', '/'
-        $link    = "[[" + ($rel -replace '\.md$', '') + "]]"
-        $type    = if ($f.type)           { $f.type }           else { "concept" }
-        $scope   = if ($f.scope)          { $f.scope }          else { "" }
-        $proj    = if ($f.source_project) { $f.source_project } else { "" }
-        $summary = if ($f.summary)        { $f.summary }        else { Get-LeadSentence $raw }
-        $src     = if ($f.first_source)   { $f.first_source }   else { "" }
-        $upd     = if ($f.updated)        { $f.updated }        elseif ($f.filed) { $f.filed } else { "" }
-        $dom     = if ($f.domains)        { ($f.domains -replace '[\[\]"]', '').Trim() } else { "" }
+foreach ($md in (Get-AllArticles -IncludeQa)) {
+    $raw     = Get-Content $md.FullName -Raw -Encoding UTF8
+    $f       = Get-ArticleFields $raw
+    $link    = "[[" + (Get-ArticleKey $md.FullName) + "]]"
+    $type    = if ($f.type)           { $f.type }           else { "concept" }
+    $scope   = if ($f.scope)          { $f.scope }          else { "" }
+    $proj    = if ($f.source_project) { $f.source_project } else { "" }
+    $summary = if ($f.summary)        { $f.summary }        else { Get-LeadSentence $raw }
+    $src     = if ($f.first_source)   { $f.first_source }   else { "" }
+    $upd     = if ($f.updated)        { $f.updated }        elseif ($f.filed) { $f.filed } else { "" }
+    $dom     = if ($f.domains)        { ($f.domains -replace '[\[\]"]', '').Trim() } else { "" }
 
-        $rows.Add("| $link | $(Format-Cell $type) | $(Format-Cell $scope) | $(Format-Cell $proj) | $(Format-Cell $dom) | $(Format-Cell $summary) | $(Format-Cell $src) | $(Format-Cell $upd) |")
-    }
+    $rows.Add("| $link | $(Format-Cell $type) | $(Format-Cell $scope) | $(Format-Cell $proj) | $(Format-Cell $dom) | $(Format-Cell $summary) | $(Format-Cell $src) | $(Format-Cell $upd) |")
 }
 
 $header = @(

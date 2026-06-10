@@ -237,6 +237,34 @@ function Get-DomainVocabulary {
     return @($vocab | Select-Object -Unique)
 }
 
+# Enumerate knowledge articles (concepts + connections, optionally qa), each subdir
+# sorted by name. One definition instead of nine hand-rolled loops with drifting
+# subdir sets and sort flags.
+function Get-AllArticles([switch]$IncludeQa) {
+    $dirs = @($CONCEPTS_DIR, $CONNECTIONS_DIR)
+    if ($IncludeQa) { $dirs += $QA_DIR }
+    $result = @()
+    foreach ($d in $dirs) {
+        if (Test-Path $d) { $result += Get-ChildItem $d -Filter "*.md" | Sort-Object Name }
+    }
+    return $result
+}
+
+# Knowledge-relative article key: "concepts/foo" (forward slashes, no .md) — the form
+# used as the [[wikilink]] target, the index link, and the hash-store key. Replaces
+# the Get-Rel/Get-RelKey/inline variants that drifted across scripts.
+function Get-ArticleKey([string]$FullPath) {
+    (($FullPath.Substring($KNOWLEDGE_DIR.Length).TrimStart('\', '/')) -replace '\\', '/') -replace '\.md$', ''
+}
+
+# First two table lines of index.md (header + separator) — for rendering filtered
+# index tables. Shared by session-start and the user-prompt-submit top-up.
+function Get-IndexHeader {
+    if (-not (Test-Path $INDEX_FILE)) { return "" }
+    $tableLines = @(Get-Content $INDEX_FILE -Encoding UTF8 | Where-Object { $_ -match '^\s*\|' })
+    return (@($tableLines | Select-Object -First 2)) -join "`n"
+}
+
 # Pragmatic YAML-frontmatter reader. Returns a hashtable of scalar fields (lowercased
 # keys) plus 'first_source'. Not a full YAML parser — handles `key: value` lines and
 # the `sources:` block list. Used by reindex / lint / reclassify.
