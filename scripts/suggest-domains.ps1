@@ -39,7 +39,7 @@ $pending = @($pending)
 
 Write-Host "Домены: $($articles.Count) статей, к обработке $($pending.Count). Словарь: $($vocab.Count) доменов."
 
-$i = 0
+$i = 0; $dirty = $false
 foreach ($a in $pending) {
     $i++
     $key    = Get-RelKey $a.FullName
@@ -48,8 +48,12 @@ foreach ($a in $pending) {
     catch { Write-Host "  ! $($a.Name): ошибка LLM, пропуск"; continue }
 
     $sug[$key] = $picked
-    $sug | ConvertTo-Json -Depth 5 | Set-Content -Path $OUT -Encoding UTF8
+    $dirty = $true
+    # Checkpoint every 10 instead of rewriting the whole growing JSON each article
+    # (was O(n^2) writes); resumability loses at most the last 10 on a crash.
+    if ($i % 10 -eq 0) { $sug | ConvertTo-Json -Depth 5 | Set-Content -Path $OUT -Encoding UTF8; $dirty = $false }
     Write-Host "  [$i/$($pending.Count)] $($a.Name) -> $(if ($picked.Count) { $picked -join ', ' } else { '(нет)' })"
 }
+if ($dirty) { $sug | ConvertTo-Json -Depth 5 | Set-Content -Path $OUT -Encoding UTF8 }
 
 Write-Host "`nГотово. Подсказки доменов: $OUT"
