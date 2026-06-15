@@ -9,6 +9,8 @@ state.json
 last-flush.json
 flush.log
 compile.log
+logs/
+compile-*.log
 session-flush-*.md
 flush-context-*.md
 
