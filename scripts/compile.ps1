@@ -108,6 +108,17 @@ function Get-PlannedContext([object[]]$Plan, [int]$BudgetChars = 250000) {
     return ($parts -join "`n`n---`n`n")
 }
 
+# После APPEND-обновления проставляет во frontmatter число датированных слоёв (разделов
+# «## Обновление …») и дату. Так lint отбирает пухлые статьи (layers >= N) под консолидацию,
+# не парся тела, а индекс может показать рост.
+function Update-LayerMeta([string]$Path) {
+    $raw = Get-Content $Path -Raw -Encoding UTF8
+    $layers = ([regex]::Matches($raw, '(?m)^##\s+Обновление\b')).Count
+    $raw = Set-FrontmatterField $raw 'layers' $layers
+    $raw = Set-FrontmatterField $raw 'updated' (Get-TodayIso)
+    [System.IO.File]::WriteAllText($Path, $raw, [System.Text.Encoding]::UTF8)
+}
+
 function Invoke-CompileLog {
     param([string]$LogPath)
 
@@ -115,6 +126,7 @@ function Invoke-CompileLog {
     $schema     = if (Test-Path $AGENTS_FILE) { Get-Content $AGENTS_FILE -Raw -Encoding UTF8 } else { "(AGENTS.md not found)" }
     $leaf       = Split-Path $LogPath -Leaf
     $timestamp  = Get-NowIso
+    $today      = Get-TodayIso
 
     # Проход 1 — план: что день принёс и куда втыкать (дёшево: индекс + лог).
     $plan = @(Get-CompilePlan -LogName $leaf -LogContent $logContent)
@@ -155,14 +167,15 @@ $logContent
 
 Отвечай ТОЛЬКО файловыми операциями в точном формате ниже. Без объяснений, без блоков кода.
 
-Создать или перезаписать файл:
+Создать НОВУЮ статью (только для пунктов плана НОВАЯ):
 <<<WRITE:knowledge/concepts/filename.md>>>
 [полное содержимое файла]
 <<<END>>>
 
-Дописать в существующий файл:
-<<<APPEND:knowledge/log.md>>>
-[содержимое для добавления]
+Дописать слой в СУЩЕСТВУЮЩУЮ статью (для ОБНОВИТЬ/ВОЗМОЖНО) или запись в лог:
+<<<APPEND:knowledge/concepts/existing.md>>>
+## Обновление $today
+[только новые факты этого дня]
 <<<END>>>
 
 ## Правила
@@ -178,12 +191,12 @@ $logContent
 4. НЕ трогай knowledge/index.md — его детерминированно пересоберёт reindex.ps1.
 5. Добавь запись о сборке в knowledge/log.md:
    ## [$timestamp] compile | $(Split-Path $LogPath -Leaf)
-6. Предпочитай обновлять существующие статьи, а не плодить почти-дубликаты. Но обновляй
-   (перезаписывать) ТОЛЬКО те, чьи ПОЛНЫЕ ТЕЛА приведены выше. Если тема есть в индексе, а её
-   тела выше нет — НЕ переписывай её вслепую (ты не видишь текущего содержимого); создавай
-   новую статью только если темы в индексе действительно нет.
-   При обновлении СОХРАНИ все конкретные факты старого тела (номера документов, ссылки, даты,
-   имена, примеры) — только ДОПОЛНЯЙ новым; ничего из старого не выбрасывай и не обобщай.
+6. Обновление существующей статьи (её ПОЛНОЕ ТЕЛО приведено выше) — НЕ перезаписывай через
+   WRITE. Вместо этого ДОПИШИ новое отдельным датированным слоем через APPEND: первой строкой
+   ровно «## Обновление $today», далее ТОЛЬКО новые факты/уроки этого дня (не повторяй то, что
+   уже есть в приведённом теле). Старое тело остаётся нетронутым — так ничего не теряется.
+   WRITE допустим ТОЛЬКО для пунктов плана НОВАЯ (тема, которой в индексе действительно нет).
+   Если тема есть в индексе, но её тела выше нет — не трогай статью (ты не видишь содержимого).
 7. Каждая статья должна иметь YAML frontmatter и [[wikilinks]].
 8. Используй относительные пути от корня проекта (например, knowledge/concepts/topic.md).
 9. Заголовки разделов в статьях — на русском (## Ключевые моменты, ## Детали, ## Связанные концепты, ## Источники).
@@ -193,6 +206,17 @@ $logContent
     $response = Invoke-ClaudeCLI -Prompt $prompt
     $opsCount = Invoke-ParseFileOps -Text $response -RootDir $CLAUDE_DIR -AllowedSubdir 'knowledge'
     Write-Host "  Executed $opsCount file operation(s)"
+
+    # Слои: для статей, в которые дописали APPEND-слой, обновить layers/updated во frontmatter
+    # (log.md и пр. вне knowledge/concepts|connections пропускаем).
+    $layered = 0
+    foreach ($m in [regex]::Matches($response, '<<<APPEND:([^>]+)>>>')) {
+        $rel = $m.Groups[1].Value.Trim()
+        if ($rel -notmatch '^knowledge/(concepts|connections)/') { continue }
+        $fp = Join-Path $CLAUDE_DIR $rel
+        if (Test-Path $fp) { Update-LayerMeta $fp; $layered++ }
+    }
+    if ($layered -gt 0) { Write-Host "  Слоёв дописано в $layered статью(й)" }
 }
 
 # True if a daily log holds at least one line of real knowledge — i.e. something beyond
