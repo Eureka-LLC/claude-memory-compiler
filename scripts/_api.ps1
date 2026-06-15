@@ -20,15 +20,22 @@ function Invoke-ClaudeCLI {
     for ($attempt = 1; ; $attempt++) {
         $prevEncoding = [Console]::OutputEncoding
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-        $output = $Prompt | & claude @cliArgs 2>$null
+        # 2>&1 (НЕ 2>$null): stderr приходит как ErrorRecord — отделяем его от stdout, чтобы
+        # настоящая ошибка claude (1M-контекст, rate-limit, auth) попадала в исключение и в лог,
+        # а не маскировалась под дежурное «verify claude is in PATH».
+        $merged = $Prompt | & claude @cliArgs 2>&1
         $exit   = $LASTEXITCODE
         [Console]::OutputEncoding = $prevEncoding
 
+        $stdout = @($merged | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
         if ($exit -eq 0) {
-            return ($output -is [array]) ? ($output -join "`n") : [string]$output
+            return ($stdout -join "`n")
         }
         if ($attempt -ge $MaxRetries) {
-            throw "claude CLI exited with code $exit after $attempt attempt(s). Verify that 'claude' is in PATH and authenticated (run: claude auth login)."
+            $stderr = (@($merged | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } |
+                ForEach-Object { $_.ToString() }) -join ' ').Trim()
+            $detail = if ($stderr) { ": $stderr" } else { " (stderr пуст — вероятно, claude не в PATH или не авторизован)" }
+            throw "claude CLI exited with code $exit after $attempt attempt(s)$detail"
         }
         # Backoff for transient / rate-limit failures, then retry.
         Start-Sleep -Seconds ([Math]::Min(30, 5 * $attempt))
