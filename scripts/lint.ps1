@@ -10,7 +10,7 @@
     pwsh -File lint.ps1 -StructuralOnly     # skip LLM checks (free)
 #>
 
-param([switch]$StructuralOnly)
+param([switch]$StructuralOnly, [switch]$Consolidate)
 
 . "$PSScriptRoot\_config.ps1"
 . "$PSScriptRoot\_api.ps1"
@@ -190,6 +190,21 @@ function Check-ScopeAudit {
     return $issues
 }
 
+function Check-LayeredArticles {
+    # Статьи, в которых накопились append-слои («## Обновление …»). При layers >= 4 пора
+    # консолидировать (consolidate.ps1). Аудит — только флагует; схлопывает отдельный скрипт.
+    $issues = @()
+    foreach ($article in Get-AllArticles -IncludeQa) {
+        $f = Get-ArticleFields (Get-Content $article.FullName -Raw -Encoding UTF8)
+        $n = [int]($f['layers'] ?? 0)
+        if ($n -ge 4) {
+            $issues += @{ severity = "suggestion"; check = "needs_consolidation"; file = (Get-RelPath $article.FullName);
+                detail = "Накоплено слоёв: $n — пора консолидировать (lint -Consolidate или consolidate.ps1)" }
+        }
+    }
+    return $issues
+}
+
 function Check-Contradictions {
     $parts = [System.Collections.Generic.List[string]]::new()
     foreach ($article in Get-AllArticles -IncludeQa) {
@@ -251,7 +266,8 @@ $structuralChecks = @(
     @{ name = "Stale articles";   fn = { Check-StaleArticles } },
     @{ name = "Missing backlinks";fn = { Check-MissingBacklinks } },
     @{ name = "Sparse articles";  fn = { Check-SparseArticles } },
-    @{ name = "Scope audit";      fn = { Check-ScopeAudit } }
+    @{ name = "Scope audit";      fn = { Check-ScopeAudit } },
+    @{ name = "Layered articles"; fn = { Check-LayeredArticles } }
 )
 
 foreach ($check in $structuralChecks) {
@@ -313,6 +329,17 @@ Write-Host "`nReport saved to: $reportPath"
 
 # Update state (atomic — a concurrent compile may be writing ingested at the same time)
 Update-State { param($s) $s['last_lint'] = Get-NowIso } | Out-Null
+
+# Консолидация append-слоёв (холодный путь LSM): по флагу -Consolidate схлопнуть статьи
+# layers >= 4. Отдельный исполнитель с детерминированной проверкой покрытия фактов — сам
+# lint файлы не трогает (остаётся аудитором).
+if ($Consolidate) {
+    $consolidatePs = Join-Path $SCRIPTS_DIR "consolidate.ps1"
+    if (Test-Path $consolidatePs) {
+        Write-Host "`nКонсолидация слоёв (layers >= 4)..."
+        & $consolidatePs -Threshold 4
+    }
+}
 
 Write-Host "`nResults: $($errors.Count) errors, $($warnings.Count) warnings, $($suggestions.Count) suggestions"
 if ($errors.Count -gt 0) { Write-Host "`nErrors found — knowledge base needs attention!"; exit 1 }
