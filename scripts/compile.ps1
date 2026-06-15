@@ -85,6 +85,24 @@ $logContent
     Write-Host "  Executed $opsCount file operation(s)"
 }
 
+# True if a daily log holds at least one line of real knowledge — i.e. something beyond
+# headers, the provenance line, and FLUSH_OK/FLUSH_ERROR stubs. On the days the CLI was
+# unresolved the log contains only error text; compiling those would feed the model
+# garbage and burn the hash-gate (the day could then never be recovered), so the compile
+# selection skips them. Recall-safe: anything not clearly a stub counts as content.
+function Test-DailyHasContent([string]$Path) {
+    foreach ($line in (Get-Content $Path -Encoding UTF8)) {
+        $t = $line.Trim()
+        if (-not $t) { continue }
+        if ($t.StartsWith('#')) { continue }                                              # # / ## / ### headers
+        if ($t -match '^_Проект:') { continue }                                           # provenance line
+        if ($t -match 'FLUSH_OK|FLUSH_ERROR') { continue }                                # stub markers
+        if ($t -match 'is not recognized as a name|^Check the spelling of the name') { continue }  # CLI-not-found spill
+        return $true
+    }
+    return $false
+}
+
 # --- Determine which logs to compile ---
 $state = Load-State
 
@@ -110,6 +128,11 @@ else {
             -not $ingested[$key] -or $ingested[$key]['hash'] -ne (Get-FileHash256 $_)
         }
     }
+
+    # Skip daily logs with no real knowledge — only FLUSH_ERROR / FLUSH_OK stubs (e.g. days
+    # the CLI was unresolved). Compiling them feeds error text to the model and burns the
+    # hash-gate so the day can never be recovered. An explicit -Log <file> bypasses this.
+    $toCompile = @($toCompile | Where-Object { Test-DailyHasContent $_ })
 }
 
 if (-not $toCompile) {

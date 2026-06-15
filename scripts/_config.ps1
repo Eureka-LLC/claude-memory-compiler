@@ -28,11 +28,15 @@ $REPORTS_DIR     = Join-Path $CLAUDE_DIR "reports"
 $INDEX_FILE      = Join-Path $KNOWLEDGE_DIR "index.md"
 $KB_LOG_FILE     = Join-Path $KNOWLEDGE_DIR "log.md"
 $STATE_FILE      = Join-Path $CLAUDE_DIR "state.json"
-$FLUSH_LOG       = Join-Path $CLAUDE_DIR "flush.log"
+$LOGS_DIR        = Join-Path $CLAUDE_DIR "logs"
+# Ensure logs/ exists so Add-Content writers (flush.log, domain-gaps.log) and the
+# end-of-day compile spawn's redirected stdout/stderr never fail on a fresh install.
+if (-not (Test-Path $LOGS_DIR)) { New-Item -ItemType Directory -Path $LOGS_DIR -Force | Out-Null }
+$FLUSH_LOG       = Join-Path $LOGS_DIR "flush.log"
 $REGISTRY_FILE   = Join-Path $CLAUDE_DIR "projects.json"
 $RETRO_STATE_FILE = Join-Path $CLAUDE_DIR "retro-processed.json"
 $DOMAINS_FILE    = Join-Path $CLAUDE_DIR "domains.md"
-$DOMAIN_GAPS_LOG = Join-Path $CLAUDE_DIR "domain-gaps.log"
+$DOMAIN_GAPS_LOG = Join-Path $LOGS_DIR "domain-gaps.log"
 
 # --- Model / tuning ---
 $DEFAULT_MODEL      = "claude-sonnet-4-6"

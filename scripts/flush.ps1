@@ -94,6 +94,10 @@ if (-not $context) {
 
 Write-FlushLog "INFO" "Flushing session ${SessionId}: $($context.Length) chars"
 
+# Only a genuine result (saved summary or FLUSH_OK) marks the session "processed" for the
+# retro-dedup registration below. A CLI failure must NOT — otherwise retrocompile would
+# treat the unrecoverable session as done and never recover it from the transcript.
+$flushSucceeded = $false
 try {
     # Shared flush prompt (Get-FlushSummary in _api.ps1) — same as retrocompile Quality mode.
     $result = Get-FlushSummary -Context $context
@@ -101,6 +105,7 @@ try {
     if ($result -match "FLUSH_OK") {
         Write-FlushLog "INFO" "Result: FLUSH_OK"
         Append-DailyLog "FLUSH_OK — Nothing worth saving from this session." "Memory Flush"
+        $flushSucceeded = $true
     }
     elseif ($result -match "FLUSH_ERROR") {
         Write-FlushLog "ERROR" "Result: $result"
@@ -109,6 +114,7 @@ try {
     else {
         Write-FlushLog "INFO" "Result: saved $($result.Length) chars to daily log"
         Append-DailyLog $result "Session"
+        $flushSucceeded = $true
     }
 }
 catch {
@@ -121,17 +127,21 @@ Remove-Item $ContextFile -Force -ErrorAction SilentlyContinue
 
 # Register this session in retro-processed.json so retrocompile skips it
 # (shared Load/Save-RetroState from _config.ps1 — same schema as retrocompile).
-try {
-    $retroState = Load-RetroState
-    if (-not $retroState.ContainsKey('processed')) { $retroState['processed'] = @{} }
-    $retroState['processed'][$SessionId] = @{
-        project      = "hook"
-        processed_at = (Get-NowIso)
-        mode         = "flush"
+# Only when the flush actually produced a result — a failed flush stays unregistered
+# so retrocompile can still recover the session from its transcript.
+if ($flushSucceeded) {
+    try {
+        $retroState = Load-RetroState
+        if (-not $retroState.ContainsKey('processed')) { $retroState['processed'] = @{} }
+        $retroState['processed'][$SessionId] = @{
+            project      = "hook"
+            processed_at = (Get-NowIso)
+            mode         = "flush"
+        }
+        Save-RetroState $retroState
+    } catch {
+        Write-FlushLog "WARN" "Could not update retro-processed.json: $_"
     }
-    Save-RetroState $retroState
-} catch {
-    Write-FlushLog "WARN" "Could not update retro-processed.json: $_"
 }
 
 # End-of-day auto-compile: if past $COMPILE_AFTER_HOUR and today's log has changed
@@ -155,8 +165,8 @@ if ($hour -ge $COMPILE_AFTER_HOUR) {
                 # Per-process log names ($PID) so two near-simultaneous spawns don't contend
                 # for one compile.log; capture stderr too; -NoProfile to match the other spawns.
                 $tag    = "$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$PID"
-                $outLog = Join-Path $CLAUDE_DIR "compile-$tag.out.log"
-                $errLog = Join-Path $CLAUDE_DIR "compile-$tag.err.log"
+                $outLog = Join-Path $LOGS_DIR "compile-$tag.out.log"
+                $errLog = Join-Path $LOGS_DIR "compile-$tag.err.log"
                 Start-Process -FilePath "pwsh" `
                     -ArgumentList @("-NoProfile", "-NonInteractive", "-File", "`"$compilePs`"", "-Log", "`"$logPath`"") `
                     -WindowStyle Hidden `
